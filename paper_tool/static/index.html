@@ -7,24 +7,24 @@
   <style>
     :root{color-scheme:light dark;--bg:#f6f7f9;--panel:#fff;--text:#15171a;--muted:#68707a;--border:#dfe3e8;--accent:#2563eb;--good:#15803d;--bad:#b91c1c;--warn:#a16207}
     @media(prefers-color-scheme:dark){:root{--bg:#111315;--panel:#191c20;--text:#f3f4f6;--muted:#a9b0b8;--border:#30363d;--accent:#60a5fa;--good:#4ade80;--bad:#f87171;--warn:#facc15}}
-    *{box-sizing:border-box} body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
+    *{box-sizing:border-box} html{scroll-behavior:smooth}body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
     main{max-width:1200px;margin:0 auto;padding:28px 18px 56px} h1{margin:0 0 6px;font-size:26px} h2{font-size:17px;margin:0 0 14px} p{color:var(--muted)}
-    .grid{display:grid;grid-template-columns:1.08fr .92fr;gap:18px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px}
-    textarea,input,select{width:100%;border:1px solid var(--border);border-radius:10px;background:transparent;color:inherit;padding:10px 12px;font:inherit} textarea{min-height:190px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    .grid{display:grid;grid-template-columns:1.08fr .92fr;gap:18px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}.panel:hover{border-color:color-mix(in srgb,var(--accent) 38%,var(--border));box-shadow:0 10px 28px color-mix(in srgb,var(--text) 8%,transparent);transform:translateY(-1px)}
+    textarea,input,select{width:100%;border:1px solid var(--border);border-radius:10px;background:transparent;color:inherit;padding:10px 12px;font:inherit;transition:border-color .16s ease,box-shadow .16s ease}textarea:focus,input:focus,select:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}textarea{min-height:190px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
     label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
-    button{border:0;border-radius:10px;padding:11px 15px;background:var(--accent);color:white;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:not-allowed}.secondary{background:transparent;color:var(--text);border:1px solid var(--border)}.danger{background:var(--bad)}
+    button{border:0;border-radius:10px;padding:11px 15px;background:var(--accent);color:white;font-weight:650;cursor:pointer;transition:transform .14s ease,filter .14s ease,box-shadow .14s ease}button:hover:not(:disabled){filter:brightness(1.06);transform:translateY(-1px);box-shadow:0 5px 14px color-mix(in srgb,var(--accent) 24%,transparent)}button:active:not(:disabled){transform:translateY(0)}button:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 30%,transparent);outline-offset:2px}button:disabled{opacity:.55;cursor:not-allowed}.secondary{background:transparent;color:var(--text);border:1px solid var(--border)}.danger{background:var(--bad)}
     .actions{display:flex;gap:10px;margin-top:15px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.stat{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:13px}.stat b{display:block;font-size:23px;margin-top:3px}.stat span{color:var(--muted);font-size:12px}
-    .hint{font-size:12px;line-height:1.55;color:var(--muted)}.supported{display:flex;gap:7px;flex-wrap:wrap}.chip{border:1px solid var(--border);border-radius:999px;padding:5px 9px;font-size:12px}
-    .callout{border-left:4px solid var(--accent);padding:10px 12px;background:color-mix(in srgb,var(--accent) 8%,transparent);border-radius:8px;font-size:13px;color:var(--muted);margin-top:12px}
-    .table-wrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:var(--panel)}table{border-collapse:collapse;width:100%;min-width:980px}th,td{padding:10px 11px;border-bottom:1px solid var(--border);text-align:left;font-size:13px;vertical-align:top}th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-size:12px}
+    .hint{font-size:12px;line-height:1.55;color:var(--muted)}.supported{display:flex;gap:7px;flex-wrap:wrap}.chip{border:1px solid var(--border);border-radius:999px;padding:5px 9px;font-size:12px;transition:border-color .15s ease,background .15s ease}.chip:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent)}
+    .callout{border-left:4px solid var(--accent);padding:10px 12px;background:color-mix(in srgb,var(--accent) 8%,transparent);border-radius:8px;font-size:13px;color:var(--muted);margin-top:12px;transition:background .18s ease,transform .18s ease}.callout.changed{background:color-mix(in srgb,var(--accent) 15%,transparent);transform:translateX(2px)}
+    .table-wrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:var(--panel)}table{border-collapse:collapse;width:100%;min-width:980px}th,td{padding:10px 11px;border-bottom:1px solid var(--border);text-align:left;font-size:13px;vertical-align:top}th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-size:12px}tbody tr{transition:background .14s ease}tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
     .status{font-weight:700}.success,.skipped_duplicate{color:var(--good)}.failed,.timeout,.browser_crashed,.process_error{color:var(--bad)}.partial{color:var(--warn)}.running{color:var(--accent)}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}#message{min-height:22px;font-size:13px;color:var(--muted);margin-top:10px}
-    @media(max-width:800px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}
+    @media(max-width:800px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.panel,button,textarea,input,select,.chip,.callout,tbody tr{transition:none}.panel:hover{transform:none}}
   </style>
 </head>
 <body>
 <main>
   <h1>Paper Download Tool</h1>
-  <p>DOI → 正文 + Supporting Information。每个 DOI 使用独立 Python 子进程 + 独立 Edge，浏览器卡死只终止这一篇。</p>
+  <p>批量下载论文正文和补充材料。粘贴 DOI，也可以上传清单。</p>
 
   <div class="grid">
     <section class="panel">
@@ -42,10 +42,10 @@
       <input id="pathInput" placeholder="D:\code\paper_search_agent\search_batch.json">
       <div class="row">
         <div><label for="concurrency">同时运行 DOI 子进程</label><select id="concurrency"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
-        <div><label for="timeout">每篇硬超时（秒）</label><select id="timeout"><option>60</option><option>90</option><option selected>120</option><option>180</option><option>240</option></select></div>
+        <div><label for="timeout">每篇硬超时（秒）</label><select id="timeout"><option value="180" selected>180</option><option value="210">210</option><option value="240">240</option></select></div>
       </div>
       <div class="actions"><button id="startFile">上传并开始</button><button id="startPath" class="secondary">读取路径并开始</button><button id="cancelJob" class="danger" disabled>取消当前 Job</button></div>
-      <div class="callout">120 秒是父进程的硬预算：即使 Pydoll 内部 Runtime.evaluate、Cloudflare、WebSocket 或 Edge shutdown 卡死，超时后也会杀掉该 DOI 子进程及其后代 Edge，再继续队列。</div>
+      <div class="callout" id="timeoutHelp" aria-live="polite"></div>
     </section>
   </div>
 
@@ -57,9 +57,9 @@
   </div>
 
   <section class="panel" style="margin-bottom:18px">
-    <h2>Publisher Adapters</h2>
-    <div class="supported"><span class="chip">ACS</span><span class="chip">RSC</span><span class="chip">Wiley</span><span class="chip">SpringerLink</span><span class="chip">Elsevier API + experimental browser</span></div>
-    <p class="hint">硬性 DOI 去重在任何子进程/Edge 启动之前执行：若 <code>downloads/**/paper/&lt;doi&gt;.pdf</code> 已存在且通过 PDF 校验，整篇任务直接 <code>skipped_duplicate</code>，不访问网页、不重新下载 SI。</p>
+    <h2>支持的出版社</h2>
+    <div class="supported"><span class="chip">ACS</span><span class="chip">RSC</span><span class="chip">Wiley</span><span class="chip">SpringerLink</span><span class="chip">Elsevier API / 浏览器降级</span></div>
+    <p class="hint">正文和 SI 都通过校验时会直接跳过。SI 缺失或损坏时，只补下缺失文件，不重复下载正文。</p>
     <div id="message" aria-live="polite"></div>
   </section>
 
@@ -74,6 +74,8 @@
 const $=s=>document.querySelector(s);let pollTimer=null,currentJob=null;
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function setMessage(t){$('#message').textContent=t} function params(){return{max_concurrency:Number($('#concurrency').value),article_timeout_seconds:Number($('#timeout').value)}}
+const timeoutMessages={180:'常规文章最多等待 180 秒。文件较大或网络较慢时，可改为 210 或 240 秒；Wiley 会自动使用 600 秒预算。',210:'常规文章最多等待 210 秒，适合正文或补充材料较大的任务；Wiley 会自动使用 600 秒预算。',240:'常规文章最多等待 240 秒。等待更久，但能减少慢速下载被提前终止；Wiley 会自动使用 600 秒预算。'};
+function updateTimeoutHelp(){const box=$('#timeoutHelp'),value=$('#timeout').value;box.textContent=timeoutMessages[value];box.classList.remove('changed');requestAnimationFrame(()=>box.classList.add('changed'));setTimeout(()=>box.classList.remove('changed'),260)}
 async function jsonFetch(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.detail||r.statusText);return d}
 async function submitText(){const text=$('#doiText').value.trim();if(!text){setMessage('请先粘贴 DOI。');return}try{const d=await jsonFetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doi_text:text,...params()})});beginPolling(d.job_id)}catch(e){setMessage(e.message)}}
 async function submitFile(){const f=$('#fileInput').files[0];if(!f){setMessage('请选择文件。');return}const p=params(),form=new FormData();form.append('file',f);const qs=new URLSearchParams({max_concurrency:p.max_concurrency,article_timeout_seconds:p.article_timeout_seconds,doi_field:'doi'});try{beginPolling((await jsonFetch('/api/jobs/upload?'+qs,{method:'POST',body:form})).job_id)}catch(e){setMessage(e.message)}}
@@ -82,7 +84,7 @@ async function cancelCurrent(){if(!currentJob)return;try{await jsonFetch('/api/j
 function beginPolling(id){currentJob=id;$('#sJob').textContent=id;$('#cancelJob').disabled=false;setMessage('任务已启动。');if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,2500)}
 async function refresh(){if(!currentJob)return;try{const j=await jsonFetch('/api/jobs/'+currentJob);$('#sTotal').textContent=j.total;$('#sDone').textContent=j.completed;$('#sRunning').textContent=j.running;render(j.results||[]);setMessage(`Job ${j.id}: ${j.status} · ${j.completed}/${j.total}`+(j.error?` · ${j.error}`:''));if(['completed','failed','cancelled'].includes(j.status)){clearInterval(pollTimer);pollTimer=null;$('#cancelJob').disabled=true}}catch(e){setMessage('读取状态失败：'+e.message)}}
 function render(items){$('#results').innerHTML=items.map(x=>{const paper=x.paper?.valid?'✓':(x.paper?'✗':'—'),si=`${x.si_successful??0}/${x.si_detected??0}`,stage=x.diagnostics?.last_event?.stage||'';return `<tr><td><code>${esc(x.doi)}</code></td><td class="status ${esc(x.status)}">${esc(x.status)}</td><td>${esc(x.publisher||'—')}</td><td>${esc(x.journal||'—')}</td><td>${paper}</td><td>${si}</td><td>${x.elapsed_seconds==null?'—':esc(x.elapsed_seconds)+' s'}</td><td>${stage?'<code>'+esc(stage)+'</code> · ':''}${esc(x.message||'')}</td></tr>`}).join('')}
-$('#startText').addEventListener('click',submitText);$('#startFile').addEventListener('click',submitFile);$('#startPath').addEventListener('click',submitPath);$('#cancelJob').addEventListener('click',cancelCurrent);$('#clearText').addEventListener('click',()=>{$('#doiText').value=''})
+$('#startText').addEventListener('click',submitText);$('#startFile').addEventListener('click',submitFile);$('#startPath').addEventListener('click',submitPath);$('#cancelJob').addEventListener('click',cancelCurrent);$('#clearText').addEventListener('click',()=>{$('#doiText').value='';$('#doiText').focus();setMessage('已清空。')});$('#timeout').addEventListener('change',updateTimeoutHelp);updateTimeoutHelp();
 </script>
 </body>
 </html>

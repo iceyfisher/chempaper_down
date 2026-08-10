@@ -122,7 +122,7 @@ The UI accepts:
 - TXT / JSON / JSONL / CSV upload;
 - a local manifest path accessible to the server;
 - concurrency 1–4;
-- hard per-DOI budget 60–240 s;
+- hard per-DOI budget 180, 210, or 240 s in the Web UI;
 - cancellation of the active Job.
 
 ## CLI batch
