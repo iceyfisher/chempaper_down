@@ -48,6 +48,7 @@ await pdf_link.execute_script("this.click()", user_gesture=True)
 - After paper download, the adapter **always restores the original Article page** before SI discovery.
 - Supporting Information tables, `action/downloadSupplement`, `/doi/supinfo/`, and current platform attachment links are scanned together.
 - SI URLs are collected first, then downloaded with Blob so clicking one SI cannot destroy page state.
+- If a large SI exceeds Pydoll's 60-second CDP command wait, the adapter retries it through Chromium's native download manager without leaving the article page.
 - Wiley uses a 600-second hard DOI budget and a 300-second per-attachment budget. Timeout cleanup still targets only the current DOI process tree.
 
 ### Springer Nature Link / SpringerLink (`10.1007/*`)

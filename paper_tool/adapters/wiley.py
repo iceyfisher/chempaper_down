@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from urllib.parse import urljoin
+from pathlib import Path
+from urllib.parse import parse_qs, urljoin, urlparse
 
 from .base import AdapterContext, PublisherAdapter
 from ..browser import tab_identity
-from ..download import blob_download, click_element_and_wait
+from ..download import (
+    DownloadArtifact,
+    blob_download,
+    click_element_and_wait,
+    native_navigation_download,
+)
 from ..models import ArticleResult
 from ..resources import infer_extension
 from ..storage import doi_to_filename
@@ -93,6 +99,40 @@ def select_wiley_si(records: list[dict]) -> list[dict]:
         seen.add(url)
         selected.append({"url": url, "text": text.strip()})
     return selected
+
+
+async def download_wiley_attachment(
+    tab,
+    worker,
+    url: str,
+    target: Path,
+    timeout: float,
+    *,
+    link_text: str,
+    extension: str,
+) -> tuple[DownloadArtifact | Path | None, str]:
+    artifact = await blob_download(
+        tab,
+        worker.staging_dir,
+        url,
+        target,
+        timeout,
+        link_text=link_text,
+    )
+    if artifact is not None:
+        return artifact, "fetch_blob"
+
+    path = await native_navigation_download(worker, url, target, timeout)
+    if path is None:
+        return None, "fetch_blob_then_native_navigation_failed"
+
+    original_filename = (parse_qs(urlparse(url).query).get("file") or [None])[0]
+    return DownloadArtifact(
+        path=path,
+        extension=extension,
+        final_url=url,
+        original_filename=original_filename,
+    ), "native_navigation_fallback"
 
 
 class WileyAdapter(PublisherAdapter):
@@ -242,17 +282,27 @@ class WileyAdapter(PublisherAdapter):
             if existing:
                 result.si.append(existing)
                 continue
-            # Verified stable path: extract all URLs on the article first and use
-            # Blob downloads instead of clicking SI links and mutating page state.
-            path = await blob_download(
+            # Keep the article page stable. If a large in-page fetch exceeds
+            # Pydoll's 60-second CDP command limit, let Chromium's native download
+            # manager finish it in a temporary tab instead.
+            path, method = await download_wiley_attachment(
                 tab,
-                ctx.worker.staging_dir,
+                ctx.worker,
                 item["url"],
                 target,
                 min(ctx.settings.wiley_article_timeout_seconds, 300),
                 link_text=item["text"],
+                extension=ext,
             )
-            result.si.append(self.file_result("si", path, item["url"], "fetch_blob", extension=ext))
+            if method != "fetch_blob":
+                result.diagnostics["wiley_native_fallback_attempted"] = (
+                    result.diagnostics.get("wiley_native_fallback_attempted", 0) + 1
+                )
+                if path is not None:
+                    result.diagnostics["wiley_native_fallback_successful"] = (
+                        result.diagnostics.get("wiley_native_fallback_successful", 0) + 1
+                    )
+            result.si.append(self.file_result("si", path, item["url"], method, extension=ext))
 
         result.diagnostics["si_scan_complete"] = True
         return result

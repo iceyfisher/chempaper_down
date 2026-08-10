@@ -1,10 +1,12 @@
+import asyncio
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin
 
 from paper_tool.adapters.acs import ACSAdapter, merge_si_links
 from paper_tool.adapters.base import AdapterContext
-from paper_tool.adapters.wiley import select_wiley_si
+from paper_tool.adapters import wiley
+from paper_tool.adapters.wiley import download_wiley_attachment, select_wiley_si
 from paper_tool.config import Settings
 from paper_tool.service import _duplicate_result
 from paper_tool.storage import manifest_has_complete_si
@@ -89,6 +91,47 @@ def test_wiley_uses_extended_hard_budget():
     settings = Settings(article_timeout_seconds=120).normalized()
     assert settings.timeout_for_doi("10.1002/anie.202503908") == 600
     assert settings.timeout_for_doi("10.1021/example") == 120
+
+
+def test_wiley_large_attachment_falls_back_to_native_download(monkeypatch, tmp_path: Path):
+    calls: list[tuple[str, float]] = []
+    url = (
+        "https://onlinelibrary.wiley.com/action/downloadSupplement"
+        "?doi=10.1002%2Fanie.2761225&file=anie74111-sup-0001-SuppMat.docx"
+    )
+    target = tmp_path / "stable.docx"
+
+    async def fake_blob(tab, staging_dir, source_url, output, timeout, *, link_text):
+        calls.append(("blob", timeout))
+        return None
+
+    async def fake_native(worker, source_url, output, timeout):
+        calls.append(("native", timeout))
+        output.write_bytes(b"PK\x03\x04fixture")
+        return output
+
+    monkeypatch.setattr(wiley, "blob_download", fake_blob)
+    monkeypatch.setattr(wiley, "native_navigation_download", fake_native)
+    worker = type("Worker", (), {"staging_dir": tmp_path})()
+
+    artifact, method = asyncio.run(
+        download_wiley_attachment(
+            object(),
+            worker,
+            url,
+            target,
+            300,
+            link_text="Supporting File 1",
+            extension=".docx",
+        )
+    )
+
+    assert method == "native_navigation_fallback"
+    assert calls == [("blob", 300), ("native", 300)]
+    assert artifact is not None
+    assert artifact.path == target
+    assert artifact.extension == ".docx"
+    assert artifact.original_filename == "anie74111-sup-0001-SuppMat.docx"
 
 
 def test_complete_duplicate_result_preserves_si_summary(tmp_path: Path):
