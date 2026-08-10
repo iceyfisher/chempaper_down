@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Paper Download Tool</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#f6f7f9;--panel:#fff;--text:#15171a;--muted:#68707a;--border:#dfe3e8;--accent:#2563eb;--good:#15803d;--bad:#b91c1c;--warn:#a16207}
+    @media(prefers-color-scheme:dark){:root{--bg:#111315;--panel:#191c20;--text:#f3f4f6;--muted:#a9b0b8;--border:#30363d;--accent:#60a5fa;--good:#4ade80;--bad:#f87171;--warn:#facc15}}
+    *{box-sizing:border-box} body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
+    main{max-width:1200px;margin:0 auto;padding:28px 18px 56px} h1{margin:0 0 6px;font-size:26px} h2{font-size:17px;margin:0 0 14px} p{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1.08fr .92fr;gap:18px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px}
+    textarea,input,select{width:100%;border:1px solid var(--border);border-radius:10px;background:transparent;color:inherit;padding:10px 12px;font:inherit} textarea{min-height:190px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+    button{border:0;border-radius:10px;padding:11px 15px;background:var(--accent);color:white;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:not-allowed}.secondary{background:transparent;color:var(--text);border:1px solid var(--border)}.danger{background:var(--bad)}
+    .actions{display:flex;gap:10px;margin-top:15px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.stat{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:13px}.stat b{display:block;font-size:23px;margin-top:3px}.stat span{color:var(--muted);font-size:12px}
+    .hint{font-size:12px;line-height:1.55;color:var(--muted)}.supported{display:flex;gap:7px;flex-wrap:wrap}.chip{border:1px solid var(--border);border-radius:999px;padding:5px 9px;font-size:12px}
+    .callout{border-left:4px solid var(--accent);padding:10px 12px;background:color-mix(in srgb,var(--accent) 8%,transparent);border-radius:8px;font-size:13px;color:var(--muted);margin-top:12px}
+    .table-wrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:var(--panel)}table{border-collapse:collapse;width:100%;min-width:980px}th,td{padding:10px 11px;border-bottom:1px solid var(--border);text-align:left;font-size:13px;vertical-align:top}th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-size:12px}
+    .status{font-weight:700}.success,.skipped_duplicate{color:var(--good)}.failed,.timeout,.browser_crashed,.process_error{color:var(--bad)}.partial{color:var(--warn)}.running{color:var(--accent)}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}#message{min-height:22px;font-size:13px;color:var(--muted);margin-top:10px}
+    @media(max-width:800px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Paper Download Tool</h1>
+  <p>DOI → 正文 + Supporting Information。每个 DOI 使用独立 Python 子进程 + 独立 Edge，浏览器卡死只终止这一篇。</p>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>直接输入 DOI</h2>
+      <label for="doiText">DOI、DOI URL 或上游 Agent 输出文本</label>
+      <textarea id="doiText" placeholder="10.1021/...&#10;https://doi.org/10.1002/...&#10;10.1007/..."></textarea>
+      <div class="actions"><button id="startText">开始批量下载</button><button id="clearText" class="secondary">清空</button></div>
+    </section>
+
+    <section class="panel">
+      <h2>搜索清单文件</h2>
+      <label for="fileInput">TXT / JSON / JSONL / CSV 上传</label>
+      <input id="fileInput" type="file" accept=".txt,.md,.json,.jsonl,.ndjson,.csv,.tsv">
+      <label for="pathInput" style="margin-top:12px">或本机/服务器可访问路径</label>
+      <input id="pathInput" placeholder="D:\code\paper_search_agent\search_batch.json">
+      <div class="row">
+        <div><label for="concurrency">同时运行 DOI 子进程</label><select id="concurrency"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
+        <div><label for="timeout">每篇硬超时（秒）</label><select id="timeout"><option>60</option><option>90</option><option selected>120</option><option>180</option><option>240</option></select></div>
+      </div>
+      <div class="actions"><button id="startFile">上传并开始</button><button id="startPath" class="secondary">读取路径并开始</button><button id="cancelJob" class="danger" disabled>取消当前 Job</button></div>
+      <div class="callout">120 秒是父进程的硬预算：即使 Pydoll 内部 Runtime.evaluate、Cloudflare、WebSocket 或 Edge shutdown 卡死，超时后也会杀掉该 DOI 子进程及其后代 Edge，再继续队列。</div>
+    </section>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span>任务总数</span><b id="sTotal">0</b></div>
+    <div class="stat"><span>已完成</span><b id="sDone">0</b></div>
+    <div class="stat"><span>运行中</span><b id="sRunning">0</b></div>
+    <div class="stat"><span>当前 Job</span><b id="sJob" style="font-size:14px">—</b></div>
+  </div>
+
+  <section class="panel" style="margin-bottom:18px">
+    <h2>Publisher Adapters</h2>
+    <div class="supported"><span class="chip">ACS</span><span class="chip">RSC</span><span class="chip">Wiley</span><span class="chip">SpringerLink</span><span class="chip">Elsevier API + experimental browser</span></div>
+    <p class="hint">硬性 DOI 去重在任何子进程/Edge 启动之前执行：若 <code>downloads/**/paper/&lt;doi&gt;.pdf</code> 已存在且通过 PDF 校验，整篇任务直接 <code>skipped_duplicate</code>，不访问网页、不重新下载 SI。</p>
+    <div id="message" aria-live="polite"></div>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>DOI</th><th>状态</th><th>出版社</th><th>期刊</th><th>正文</th><th>SI</th><th>耗时</th><th>阶段 / 信息</th></tr></thead>
+      <tbody id="results"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+const $=s=>document.querySelector(s);let pollTimer=null,currentJob=null;
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function setMessage(t){$('#message').textContent=t} function params(){return{max_concurrency:Number($('#concurrency').value),article_timeout_seconds:Number($('#timeout').value)}}
+async function jsonFetch(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.detail||r.statusText);return d}
+async function submitText(){const text=$('#doiText').value.trim();if(!text){setMessage('请先粘贴 DOI。');return}try{const d=await jsonFetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doi_text:text,...params()})});beginPolling(d.job_id)}catch(e){setMessage(e.message)}}
+async function submitFile(){const f=$('#fileInput').files[0];if(!f){setMessage('请选择文件。');return}const p=params(),form=new FormData();form.append('file',f);const qs=new URLSearchParams({max_concurrency:p.max_concurrency,article_timeout_seconds:p.article_timeout_seconds,doi_field:'doi'});try{beginPolling((await jsonFetch('/api/jobs/upload?'+qs,{method:'POST',body:form})).job_id)}catch(e){setMessage(e.message)}}
+async function submitPath(){const input_path=$('#pathInput').value.trim();if(!input_path){setMessage('请输入清单路径。');return}try{beginPolling((await jsonFetch('/api/jobs/path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input_path,doi_field:'doi',...params()})})).job_id)}catch(e){setMessage(e.message)}}
+async function cancelCurrent(){if(!currentJob)return;try{await jsonFetch('/api/jobs/'+currentJob+'/cancel',{method:'POST'});setMessage('已请求取消；活动 DOI 子进程及其 Edge 将被终止。');await refresh()}catch(e){setMessage(e.message)}}
+function beginPolling(id){currentJob=id;$('#sJob').textContent=id;$('#cancelJob').disabled=false;setMessage('任务已启动。');if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,2500)}
+async function refresh(){if(!currentJob)return;try{const j=await jsonFetch('/api/jobs/'+currentJob);$('#sTotal').textContent=j.total;$('#sDone').textContent=j.completed;$('#sRunning').textContent=j.running;render(j.results||[]);setMessage(`Job ${j.id}: ${j.status} · ${j.completed}/${j.total}`+(j.error?` · ${j.error}`:''));if(['completed','failed','cancelled'].includes(j.status)){clearInterval(pollTimer);pollTimer=null;$('#cancelJob').disabled=true}}catch(e){setMessage('读取状态失败：'+e.message)}}
+function render(items){$('#results').innerHTML=items.map(x=>{const paper=x.paper?.valid?'✓':(x.paper?'✗':'—'),si=`${x.si_successful??0}/${x.si_detected??0}`,stage=x.diagnostics?.last_event?.stage||'';return `<tr><td><code>${esc(x.doi)}</code></td><td class="status ${esc(x.status)}">${esc(x.status)}</td><td>${esc(x.publisher||'—')}</td><td>${esc(x.journal||'—')}</td><td>${paper}</td><td>${si}</td><td>${x.elapsed_seconds==null?'—':esc(x.elapsed_seconds)+' s'}</td><td>${stage?'<code>'+esc(stage)+'</code> · ':''}${esc(x.message||'')}</td></tr>`}).join('')}
+$('#startText').addEventListener('click',submitText);$('#startFile').addEventListener('click',submitFile);$('#startPath').addEventListener('click',submitPath);$('#cancelJob').addEventListener('click',cancelCurrent);$('#clearText').addEventListener('click',()=>{$('#doiText').value=''})
+</script>
+</body>
+</html>
