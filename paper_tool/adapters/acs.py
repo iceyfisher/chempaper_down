@@ -17,6 +17,19 @@ ACS_FALLBACK = {
 }
 
 
+def merge_si_links(*groups: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            url = item.get("url")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            merged.append(item)
+    return merged
+
+
 class ACSAdapter(PublisherAdapter):
     key = "ACS"
     publisher_name = "American Chemical Society"
@@ -42,40 +55,47 @@ class ACSAdapter(PublisherAdapter):
             title=title,
         )
 
-        paper_element = None
-        for selector in (
-            '//a[contains(normalize-space(.),"Open PDF")]',
-            'a[href*="/article-pdf/"]',
-        ):
-            paper_element = await tab.query(selector, timeout=12, raise_exc=False)
+        result.paper = self.existing_paper_result(ctx)
+        if result.paper is None:
+            paper_element = None
+            for selector in (
+                '//a[contains(normalize-space(.),"Open PDF")]',
+                'a[href*="/article-pdf/"]',
+            ):
+                paper_element = await tab.query(selector, timeout=12, raise_exc=False)
+                if paper_element:
+                    break
             if paper_element:
-                break
-        if paper_element:
-            href = paper_element.get_attribute("href")
-            pdf_url = urljoin(await tab.current_url, href) if href else None
-            if pdf_url:
-                target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
-                path = await blob_download(
-                    tab, ctx.worker.staging_dir, pdf_url, target,
-                    min(ctx.settings.blob_download_timeout_seconds, 75),
-                )
-                result.paper = self.file_result("paper", path, pdf_url, "fetch_blob", extension=".pdf")
+                href = paper_element.get_attribute("href")
+                pdf_url = urljoin(await tab.current_url, href) if href else None
+                if pdf_url:
+                    target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
+                    path = await blob_download(
+                        tab, ctx.worker.staging_dir, pdf_url, target,
+                        min(ctx.settings.blob_download_timeout_seconds, 75),
+                    )
+                    result.paper = self.file_result(
+                        "paper", path, pdf_url, "fetch_blob", extension=".pdf"
+                    )
 
-        si_links = await self.collect_links(tab, 'a[data-doctype="dataSupplementDoc"]')
-        if not si_links:
-            si_links = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
+        typed_links = await self.collect_links(tab, 'a[data-doctype="dataSupplementDoc"]')
+        route_links = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
+        si_links = merge_si_links(typed_links, route_links)
+        result.diagnostics["acs_si_candidates"] = len(si_links)
 
-        for idx, item in enumerate(si_links, 1):
+        for item in si_links:
             ext = infer_extension(item["url"], item["text"])
-            target = si_dir / f"{doi_to_filename(ctx.doi)}_si_{idx:03d}{ext}"
-            existing = self.existing_file_result("si", target, item["url"], ext)
+            target = self.si_target(si_dir, ctx.doi, item["url"], ext)
+            existing = self.existing_file_result(ctx, "si", target, item["url"], ext)
             if existing:
                 result.si.append(existing)
                 continue
             path = await blob_download(
                 tab, ctx.worker.staging_dir, item["url"], target,
                 min(ctx.settings.blob_download_timeout_seconds, 75),
+                link_text=item["text"],
             )
             result.si.append(self.file_result("si", path, item["url"], "fetch_blob", extension=ext))
 
+        result.diagnostics["si_scan_complete"] = True
         return result

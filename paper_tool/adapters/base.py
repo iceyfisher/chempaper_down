@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,8 +9,9 @@ from urllib.parse import urljoin
 
 from ..browser import BrowserWorker
 from ..config import Settings
+from ..download import DownloadArtifact
 from ..models import ArticleResult, FileResult
-from ..storage import make_article_dirs, sha256_file, validate_file
+from ..storage import doi_to_filename, make_article_dirs, sha256_file, validate_file
 
 
 @dataclass(slots=True)
@@ -17,6 +19,8 @@ class AdapterContext:
     worker: BrowserWorker
     settings: Settings
     doi: str
+    existing_paper: Path | None = None
+    previous_manifest: dict | None = None
 
     @property
     def tab(self):
@@ -106,6 +110,28 @@ class PublisherAdapter(ABC):
     def dirs(self, ctx: AdapterContext, journal: str) -> tuple[Path, Path, Path]:
         return make_article_dirs(ctx.settings.download_root, self.publisher_name, journal)
 
+    def si_target(self, si_dir: Path, doi: str, source_url: str, extension: str) -> Path:
+        digest = hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:10]
+        return si_dir / f"{doi_to_filename(doi)}_si_{digest}{extension}"
+
+    def existing_paper_result(self, ctx: AdapterContext) -> FileResult | None:
+        path = ctx.existing_paper
+        if path is None or not path.exists():
+            return None
+        valid, _ = validate_file(path, ".pdf")
+        if not valid:
+            return None
+        return FileResult(
+            kind="paper",
+            path=str(path),
+            method="existing_main_pdf_for_si_resume",
+            extension=".pdf",
+            size=path.stat().st_size,
+            sha256=sha256_file(path),
+            valid=True,
+            existing=True,
+        )
+
     async def collect_links(self, tab, selector: str, base_url: str | None = None) -> list[dict]:
         elements = await tab.query(selector, timeout=15, find_all=True, raise_exc=False)
         if not elements:
@@ -128,33 +154,83 @@ class PublisherAdapter(ABC):
         return result
 
 
-    def existing_file_result(self, kind: str, target: Path, source_url: str, extension: str) -> FileResult | None:
-        if not target.exists():
-            return None
-        valid, _ = validate_file(target, extension)
-        if not valid:
-            return None
-        return FileResult(
-            kind=kind, path=str(target), source_url=source_url, method="already_exists",
-            extension=extension, size=target.stat().st_size, sha256=sha256_file(target),
-            valid=True, existing=True,
-        )
+    def existing_file_result(
+        self,
+        ctx: AdapterContext,
+        kind: str,
+        target: Path,
+        source_url: str,
+        extension: str,
+    ) -> FileResult | None:
+        previous = ctx.previous_manifest or {}
+        for item in previous.get("si") or []:
+            if item.get("source_url") != source_url or not item.get("path"):
+                continue
+            candidate = Path(item["path"])
+            actual_extension = item.get("extension") or candidate.suffix
+            valid, _ = validate_file(candidate, actual_extension)
+            if valid:
+                return FileResult(
+                    kind=kind,
+                    path=str(candidate),
+                    source_url=source_url,
+                    method="already_exists_manifest_url_match",
+                    extension=actual_extension,
+                    size=candidate.stat().st_size,
+                    sha256=sha256_file(candidate),
+                    valid=True,
+                    existing=True,
+                    final_url=item.get("final_url"),
+                    original_filename=item.get("original_filename"),
+                    declared_mime_type=item.get("declared_mime_type"),
+                    content_disposition=item.get("content_disposition"),
+                    response_headers=item.get("response_headers") or {},
+                )
 
-    def file_result(self, kind: str, path: Path | None, source_url: str, method: str,
+        candidates = [target]
+        candidates.extend(
+            path for path in target.parent.glob(target.stem + ".*") if path != target
+        )
+        for candidate in candidates:
+            actual_extension = candidate.suffix or extension
+            valid, _ = validate_file(candidate, actual_extension)
+            if valid:
+                return FileResult(
+                    kind=kind,
+                    path=str(candidate),
+                    source_url=source_url,
+                    method="already_exists_stable_url_target",
+                    extension=actual_extension,
+                    size=candidate.stat().st_size,
+                    sha256=sha256_file(candidate),
+                    valid=True,
+                    existing=True,
+                )
+        return None
+
+    def file_result(self, kind: str, path: Path | DownloadArtifact | None, source_url: str, method: str,
                     *, extension: str | None = None, error: str | None = None) -> FileResult:
         from ..download import result_metadata
-        if path and path.exists():
-            meta = result_metadata(path, extension)
+        artifact = path if isinstance(path, DownloadArtifact) else None
+        actual_path = artifact.path if artifact else path
+        actual_extension = artifact.extension if artifact else extension
+        if actual_path and actual_path.exists():
+            meta = result_metadata(actual_path, actual_extension)
             return FileResult(
                 kind=kind,
-                path=str(path),
+                path=str(actual_path),
                 source_url=source_url,
                 method=method,
-                extension=extension or path.suffix,
+                extension=actual_extension or actual_path.suffix,
                 size=meta["size"],
                 sha256=meta["sha256"],
                 valid=meta["valid"],
                 error=None if meta["valid"] else meta["reason"],
+                final_url=artifact.final_url if artifact else None,
+                original_filename=artifact.original_filename if artifact else None,
+                declared_mime_type=artifact.declared_mime_type if artifact else None,
+                content_disposition=artifact.content_disposition if artifact else None,
+                response_headers=artifact.response_headers if artifact else {},
             )
         return FileResult(
             kind=kind,

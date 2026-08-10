@@ -14,6 +14,7 @@ class Settings:
 
     # Parent-process hard wall clock budget for one DOI subprocess.
     article_timeout_seconds: int = 120
+    wiley_article_timeout_seconds: int = 600
     subprocess_kill_grace_seconds: int = 5
 
     # In-child soft operation limits. The parent timeout is authoritative.
@@ -39,6 +40,7 @@ class Settings:
             download_root=root,
             max_concurrency=int(os.getenv("PAPER_TOOL_CONCURRENCY", "2")),
             article_timeout_seconds=int(os.getenv("PAPER_TOOL_ARTICLE_TIMEOUT", "120")),
+            wiley_article_timeout_seconds=int(os.getenv("PAPER_TOOL_WILEY_TIMEOUT", "600")),
             subprocess_kill_grace_seconds=int(os.getenv("PAPER_TOOL_KILL_GRACE", "5")),
             navigation_timeout_seconds=int(os.getenv("PAPER_TOOL_NAV_TIMEOUT", "30")),
             normal_element_timeout_seconds=int(os.getenv("PAPER_TOOL_ELEMENT_TIMEOUT", "18")),
@@ -60,6 +62,10 @@ class Settings:
             download_root=Path(self.download_root).expanduser().resolve(),
             max_concurrency=concurrency,
             article_timeout_seconds=article_timeout,
+            wiley_article_timeout_seconds=max(
+                article_timeout,
+                min(int(self.wiley_article_timeout_seconds), 600),
+            ),
             subprocess_kill_grace_seconds=max(1, min(int(self.subprocess_kill_grace_seconds), 30)),
             navigation_timeout_seconds=max(5, min(int(self.navigation_timeout_seconds), article_timeout)),
             normal_element_timeout_seconds=max(2, min(int(self.normal_element_timeout_seconds), article_timeout)),
@@ -88,6 +94,7 @@ class Settings:
         return {
             "download_root": str(self.download_root),
             "article_timeout_seconds": self.article_timeout_seconds,
+            "wiley_article_timeout_seconds": self.wiley_article_timeout_seconds,
             "navigation_timeout_seconds": self.navigation_timeout_seconds,
             "normal_element_timeout_seconds": self.normal_element_timeout_seconds,
             "native_download_timeout_seconds": self.native_download_timeout_seconds,
@@ -104,6 +111,7 @@ class Settings:
             download_root=Path(payload["download_root"]),
             max_concurrency=1,
             article_timeout_seconds=int(payload.get("article_timeout_seconds", 120)),
+            wiley_article_timeout_seconds=int(payload.get("wiley_article_timeout_seconds", 600)),
             navigation_timeout_seconds=int(payload.get("navigation_timeout_seconds", 30)),
             normal_element_timeout_seconds=int(payload.get("normal_element_timeout_seconds", 18)),
             native_download_timeout_seconds=int(payload.get("native_download_timeout_seconds", 35)),
@@ -113,3 +121,8 @@ class Settings:
             elsevier_api_key=payload.get("elsevier_api_key"),
             enable_pydoll_cloudflare_helper=bool(payload.get("enable_pydoll_cloudflare_helper", False)),
         ).normalized()
+
+    def timeout_for_doi(self, doi: str) -> int:
+        if doi.lower().startswith("10.1002/"):
+            return max(self.article_timeout_seconds, self.wiley_article_timeout_seconds)
+        return self.article_timeout_seconds

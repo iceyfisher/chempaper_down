@@ -63,35 +63,37 @@ class ElsevierAdapter(PublisherAdapter):
         )
 
         target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
-        path = await self._api_pdf(ctx, target)
-        if path:
-            result.paper = self.file_result(
-                "paper", path,
-                f"https://api.elsevier.com/content/article/doi/{ctx.doi}",
-                "elsevier_article_retrieval_api",
-                extension=".pdf",
-            )
-        else:
-            # Experimental browser fallback.  Common ScienceDirect PDF routes use
-            # `pdfft`/download URLs; keep selectors isolated for easy update.
-            pdf_link = None
-            for selector in (
-                'a[href*="/pdfft"]',
-                'a[href*="pdf"][href*="download"]',
-                'a[aria-label*="PDF"]',
-            ):
-                pdf_link = await tab.query(selector, timeout=6, raise_exc=False)
-                if pdf_link:
-                    break
-            if pdf_link:
-                href = pdf_link.get_attribute("href") or ""
-                from urllib.parse import urljoin
-                pdf_url = urljoin(await tab.current_url, href)
-                path = await native_navigation_download(
-                    ctx.worker, pdf_url, target,
-                    timeout=min(ctx.settings.native_download_timeout_seconds, 40),
+        result.paper = self.existing_paper_result(ctx)
+        if result.paper is None:
+            path = await self._api_pdf(ctx, target)
+            if path:
+                result.paper = self.file_result(
+                    "paper", path,
+                    f"https://api.elsevier.com/content/article/doi/{ctx.doi}",
+                    "elsevier_article_retrieval_api",
+                    extension=".pdf",
                 )
-                result.paper = self.file_result("paper", path, pdf_url, "experimental_native", extension=".pdf")
+            else:
+                # Experimental browser fallback. Common ScienceDirect PDF routes
+                # use `pdfft`/download URLs; keep selectors isolated for updates.
+                pdf_link = None
+                for selector in (
+                    'a[href*="/pdfft"]',
+                    'a[href*="pdf"][href*="download"]',
+                    'a[aria-label*="PDF"]',
+                ):
+                    pdf_link = await tab.query(selector, timeout=6, raise_exc=False)
+                    if pdf_link:
+                        break
+                if pdf_link:
+                    href = pdf_link.get_attribute("href") or ""
+                    from urllib.parse import urljoin
+                    pdf_url = urljoin(await tab.current_url, href)
+                    path = await native_navigation_download(
+                        ctx.worker, pdf_url, target,
+                        timeout=min(ctx.settings.native_download_timeout_seconds, 40),
+                    )
+                    result.paper = self.file_result("paper", path, pdf_url, "experimental_native", extension=".pdf")
 
         # Experimental SI candidate discovery: Elsevier supplementary assets often
         # expose mmc1/mmc2... resources on ars.els-cdn.com.  We intentionally collect
@@ -114,11 +116,11 @@ class ElsevierAdapter(PublisherAdapter):
 
         bridges = OriginBridgeManager(ctx.worker, tab)
         try:
-            for idx, item in enumerate(candidates, 1):
+            for item in candidates:
                 url = item["url"]
                 ext = infer_extension(url, item["text"])
-                target_si = si_dir / f"{doi_to_filename(ctx.doi)}_si_{idx:03d}{ext}"
-                existing = self.existing_file_result("si", target_si, url, ext)
+                target_si = self.si_target(si_dir, ctx.doi, url, ext)
+                existing = self.existing_file_result(ctx, "si", target_si, url, ext)
                 if existing:
                     result.si.append(existing)
                     continue
@@ -127,6 +129,7 @@ class ElsevierAdapter(PublisherAdapter):
                     path = await blob_download(
                         bridge, ctx.worker.staging_dir, url, target_si,
                         min(ctx.settings.blob_download_timeout_seconds, 60),
+                        link_text=item["text"],
                     )
                     method = "experimental_same_origin_blob"
                 else:
@@ -140,11 +143,15 @@ class ElsevierAdapter(PublisherAdapter):
                         path = await blob_download(
                             bridge, ctx.worker.staging_dir, url, target_si,
                             min(ctx.settings.blob_download_timeout_seconds, 60),
+                            link_text=item["text"],
                         )
                         method = "experimental_same_origin_blob"
                 result.si.append(self.file_result("si", path, url, method, extension=ext))
         finally:
             await bridges.close()
+
+        result.diagnostics["si_scan_complete"] = bool(candidates)
+        result.diagnostics["si_scan_strategy"] = "experimental_browser_fallback"
 
         if result.paper is None:
             result.message = (

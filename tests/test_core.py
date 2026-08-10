@@ -35,9 +35,17 @@ def test_article_result_roundtrip():
         doi="10.1002/example",
         status=ItemStatus.SUCCESS,
         paper=FileResult(kind="paper", path="x.pdf", valid=True),
-        si=[FileResult(kind="si", path="x.xlsx", valid=True)],
+        si=[FileResult(
+            kind="si",
+            path="x.xlsx",
+            valid=True,
+            original_filename="source.xlsx",
+            declared_mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response_headers={"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        )],
     )
     restored = ArticleResult.from_dict(source.to_dict())
     assert restored.status == ItemStatus.SUCCESS
     assert restored.paper and restored.paper.valid
     assert restored.si_successful == 1
+    assert restored.si[0].original_filename == "source.xlsx"

@@ -3,11 +3,36 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .browser import BrowserWorker
+from .resources import infer_extension, obvious_error_payload, resolve_download_extension
 from .storage import sha256_file, validate_file
+
+
+@dataclass(slots=True)
+class DownloadArtifact:
+    path: Path
+    extension: str
+    final_url: str | None = None
+    original_filename: str | None = None
+    declared_mime_type: str | None = None
+    content_disposition: str | None = None
+    response_headers: dict[str, str] = field(default_factory=dict)
+
+
+def _unwrap_script_result(value):
+    if not isinstance(value, dict):
+        return value
+    if "type" in value and "value" in value:
+        return value["value"]
+    if "result" in value:
+        return _unwrap_script_result(value["result"])
+    if "value" in value:
+        return value["value"]
+    return value
 
 
 async def move_downloaded(source: Path, target: Path) -> Path:
@@ -87,7 +112,9 @@ async def blob_download(
     url: str,
     target: Path,
     timeout: float,
-) -> Path | None:
+    *,
+    link_text: str = "",
+) -> DownloadArtifact | None:
     target.parent.mkdir(parents=True, exist_ok=True)
     script = f"""
     (async () => {{
@@ -106,12 +133,19 @@ async def blob_download(
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
-      return {{size: blob.size, type: blob.type, finalUrl: response.url}};
+      return {{
+        size: blob.size,
+        type: blob.type,
+        finalUrl: response.url,
+        contentType: response.headers.get('content-type') || blob.type || '',
+        contentDisposition: response.headers.get('content-disposition') || '',
+        contentLength: response.headers.get('content-length') || ''
+      }};
     }})()
     """
     try:
         async with tab.expect_download(keep_file_at=staging_dir, timeout=timeout) as download:
-            await tab.execute_script(
+            raw = await tab.execute_script(
                 script,
                 await_promise=True,
                 return_by_value=True,
@@ -120,7 +154,59 @@ async def blob_download(
             )
         source = Path(download.file_path)
         if source.exists():
-            return await move_downloaded(source, target)
+            meta = _unwrap_script_result(raw)
+            if not isinstance(meta, dict):
+                meta = {}
+            content_type = str(meta.get("contentType") or meta.get("type") or "")
+            content_disposition = str(meta.get("contentDisposition") or "")
+            with source.open("rb") as handle:
+                head = handle.read(512)
+            extension, original_filename = resolve_download_extension(
+                str(meta.get("finalUrl") or url),
+                link_text,
+                declared_mime_type=content_type,
+                content_disposition=content_disposition,
+                head=head,
+            )
+            mime = content_type.split(";", 1)[0].strip().lower()
+            looks_json = head.lstrip(b"\xef\xbb\xbf\x00\t\r\n ").startswith((b"{", b"["))
+            json_was_declared = (
+                infer_extension(str(meta.get("finalUrl") or url), link_text) == ".json"
+                or infer_extension(original_filename or "") == ".json"
+            )
+            if (mime in {"application/json", "text/json"} or looks_json) and not json_was_declared:
+                return None
+            error = obvious_error_payload(
+                head,
+                declared_mime_type=content_type,
+                extension=extension,
+            )
+            if error:
+                return None
+            valid, _ = validate_file(source, extension)
+            if not valid:
+                return None
+
+            final_target = target.with_suffix(extension)
+            final_path = await move_downloaded(source, final_target)
+            response_headers = {
+                key: value
+                for key, value in {
+                    "content-type": content_type,
+                    "content-disposition": content_disposition,
+                    "content-length": str(meta.get("contentLength") or ""),
+                }.items()
+                if value
+            }
+            return DownloadArtifact(
+                path=final_path,
+                extension=extension,
+                final_url=str(meta.get("finalUrl") or url),
+                original_filename=original_filename,
+                declared_mime_type=content_type.split(";", 1)[0].strip() or None,
+                content_disposition=content_disposition or None,
+                response_headers=response_headers,
+            )
     except Exception:
         return None
     return None

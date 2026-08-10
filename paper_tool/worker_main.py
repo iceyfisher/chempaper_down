@@ -41,13 +41,14 @@ async def run_one(request_path: Path, result_path: Path) -> int:
     payload = json.loads(request_path.read_text(encoding="utf-8"))
     doi = payload["doi"]
     settings = Settings.from_worker_payload(payload["settings"])
+    resume_si = bool(payload.get("resume_si"))
     started = time.monotonic()
     start_iso = now_iso()
 
     # A second hard duplicate check occurs in the child immediately before any
     # browser startup. This protects against two independent jobs racing.
     existing = find_existing_paper(settings.download_root, doi)
-    if existing:
+    if existing and not resume_si:
         result = ArticleResult(
             doi=doi,
             status=ItemStatus.SKIPPED_DUPLICATE,
@@ -88,7 +89,15 @@ async def run_one(request_path: Path, result_path: Path) -> int:
         event("browser_start", "Starting isolated Edge process", publisher=adapter.key)
         await worker.start()
         event("adapter", f"Running {adapter.key} adapter")
-        result = await adapter.run(AdapterContext(worker=worker, settings=settings, doi=doi))
+        result = await adapter.run(
+            AdapterContext(
+                worker=worker,
+                settings=settings,
+                doi=doi,
+                existing_paper=existing if resume_si else None,
+                previous_manifest=payload.get("previous_manifest"),
+            )
+        )
         result.status = finalize_status(result)
         result.started_at = start_iso
         result.finished_at = now_iso()

@@ -148,7 +148,8 @@ class SpringerAdapter(PublisherAdapter):
             title=await tab.title,
         )
 
-        if pdf_element:
+        result.paper = self.existing_paper_result(ctx)
+        if result.paper is None and pdf_element:
             href = pdf_element.get_attribute("href") or ""
             pdf_url = urljoin(await tab.current_url, href)
             target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
@@ -177,11 +178,11 @@ class SpringerAdapter(PublisherAdapter):
 
         bridges = OriginBridgeManager(ctx.worker, tab)
         try:
-            for idx, item in enumerate(selected, 1):
+            for item in selected:
                 url = item["href"]
                 ext = item["extension"]
-                target = si_dir / f"{doi_to_filename(ctx.doi)}_si_{idx:03d}{ext}"
-                existing = self.existing_file_result("si", target, url, ext)
+                target = self.si_target(si_dir, ctx.doi, url, ext)
+                existing = self.existing_file_result(ctx, "si", target, url, ext)
                 if existing:
                     result.si.append(existing)
                     continue
@@ -190,6 +191,7 @@ class SpringerAdapter(PublisherAdapter):
                     path = await blob_download(
                         context_tab, ctx.worker.staging_dir, url, target,
                         min(ctx.settings.blob_download_timeout_seconds, 75),
+                        link_text=(item.get("text", "") + " " + item.get("parentText", "")),
                     )
                     method = "same_origin_blob"
                     if not path:
@@ -209,10 +211,12 @@ class SpringerAdapter(PublisherAdapter):
                         path = await blob_download(
                             context_tab, ctx.worker.staging_dir, url, target,
                             min(ctx.settings.blob_download_timeout_seconds, 75),
+                            link_text=(item.get("text", "") + " " + item.get("parentText", "")),
                         )
                         method = "same_origin_blob"
                 result.si.append(self.file_result("si", path, url, method, extension=ext))
         finally:
             await bridges.close()
 
+        result.diagnostics["si_scan_complete"] = True
         return result

@@ -15,7 +15,13 @@ import psutil
 
 from .config import Settings
 from .models import ArticleResult, FileResult, ItemStatus
-from .storage import find_existing_paper, sha256_file, write_json_atomic
+from .storage import (
+    find_existing_paper,
+    load_article_manifest,
+    manifest_has_complete_si,
+    sha256_file,
+    write_json_atomic,
+)
 
 
 ProgressCallback = Callable[[ArticleResult], Awaitable[None] | None]
@@ -33,25 +39,32 @@ async def _emit(callback: ProgressCallback | None, result: ArticleResult) -> Non
         await value
 
 
-def _duplicate_result(doi: str, existing: Path) -> ArticleResult:
-    return ArticleResult(
-        doi=doi,
-        status=ItemStatus.SKIPPED_DUPLICATE,
-        paper=FileResult(
-            kind="paper",
-            path=str(existing),
-            extension=".pdf",
-            size=existing.stat().st_size,
-            sha256=sha256_file(existing),
-            valid=True,
-            existing=True,
-            method="duplicate_scan_parent",
-        ),
-        message=f"重复下载 跳过任务doi：{doi}",
-        started_at=_now(),
-        finished_at=_now(),
-        elapsed_seconds=0.0,
+def _duplicate_result(
+    doi: str,
+    existing: Path,
+    manifest: dict | None = None,
+) -> ArticleResult:
+    try:
+        result = ArticleResult.from_dict(manifest) if manifest else ArticleResult(doi=doi)
+    except (KeyError, TypeError, ValueError):
+        result = ArticleResult(doi=doi)
+    result.status = ItemStatus.SKIPPED_DUPLICATE
+    result.paper = FileResult(
+        kind="paper",
+        path=str(existing),
+        extension=".pdf",
+        size=existing.stat().st_size,
+        sha256=sha256_file(existing),
+        valid=True,
+        existing=True,
+        method="duplicate_scan_parent_complete_si",
     )
+    result.message = f"重复下载 跳过任务doi：{doi}（正文和 SI 已完整校验）"
+    result.started_at = _now()
+    result.finished_at = _now()
+    result.elapsed_seconds = 0.0
+    result.diagnostics = {**(result.diagnostics or {}), "duplicate_scan": "complete_si"}
+    return result
 
 
 def _kill_process_tree_sync(pid: int) -> None:
@@ -135,9 +148,14 @@ class DownloadService:
         result_path = work_dir / "result.json"
         log_path = self.log_dir / f"{safe}_{run_id}.log"
 
+        existing_paper = find_existing_paper(self.settings.download_root, doi)
+        previous_manifest = load_article_manifest(self.settings.download_root, doi)
         request_payload = {
             "doi": doi,
             "settings": self.settings.to_worker_payload(),
+            "resume_si": existing_paper is not None,
+            "existing_paper": str(existing_paper) if existing_paper else None,
+            "previous_manifest": previous_manifest,
         }
         write_json_atomic(request_path, request_payload)
 
@@ -208,11 +226,12 @@ class DownloadService:
 
         reader_task = asyncio.create_task(consume_output())
         timed_out = False
+        effective_timeout = self.settings.timeout_for_doi(doi)
         try:
             try:
                 await asyncio.wait_for(
                     process.wait(),
-                    timeout=self.settings.article_timeout_seconds,
+                    timeout=effective_timeout,
                 )
             except asyncio.TimeoutError:
                 timed_out = True
@@ -246,7 +265,7 @@ class DownloadService:
                 finished_at=_now(),
                 elapsed_seconds=elapsed,
                 message=(
-                    f"DOI subprocess exceeded {self.settings.article_timeout_seconds}s; "
+                    f"DOI subprocess exceeded {effective_timeout}s; "
                     "process tree and its Edge descendants were terminated"
                 ),
                 diagnostics={
@@ -318,10 +337,10 @@ class DownloadService:
         # HARD GLOBAL DUPLICATE CHECK BEFORE ANY CHILD/EDGE PROCESS STARTS.
         for doi in ordered:
             existing = find_existing_paper(self.settings.download_root, doi)
-            if existing:
-                item = _duplicate_result(doi, existing)
+            manifest = load_article_manifest(self.settings.download_root, doi)
+            if existing and manifest_has_complete_si(manifest):
+                item = _duplicate_result(doi, existing, manifest)
                 result_by_doi[doi] = item
-                self._persist_result(item)
                 await _emit(callback, item)
             else:
                 pending.append(doi)
@@ -339,10 +358,10 @@ class DownloadService:
                 # Re-check immediately before subprocess creation in case another job
                 # finished the same DOI while this task was waiting for a slot.
                 existing = find_existing_paper(self.settings.download_root, doi)
-                if existing:
-                    item = _duplicate_result(doi, existing)
+                manifest = load_article_manifest(self.settings.download_root, doi)
+                if existing and manifest_has_complete_si(manifest):
+                    item = _duplicate_result(doi, existing, manifest)
                     result_by_doi[doi] = item
-                    self._persist_result(item)
                     await _emit(callback, item)
                     return
 

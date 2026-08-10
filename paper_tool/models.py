@@ -29,6 +29,11 @@ class FileResult:
     valid: bool = False
     existing: bool = False
     error: str | None = None
+    final_url: str | None = None
+    original_filename: str | None = None
+    declared_mime_type: str | None = None
+    content_disposition: str | None = None
+    response_headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

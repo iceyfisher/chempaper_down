@@ -53,7 +53,8 @@ class RSCAdapter(PublisherAdapter):
             title=await tab.title,
         )
 
-        if pdf_element:
+        result.paper = self.existing_paper_result(ctx)
+        if result.paper is None and pdf_element:
             href = pdf_element.get_attribute("href")
             pdf_url = ("https://pubs.rsc.org" + href) if href and href.startswith("/") else urljoin(await tab.current_url, href or "")
             target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
@@ -66,13 +67,13 @@ class RSCAdapter(PublisherAdapter):
             result.paper = self.file_result("paper", path, pdf_url, "real_click", extension=".pdf")
 
         si_links = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
-        for idx, item in enumerate(si_links, 1):
+        for item in si_links:
             url = item["url"]
             if urlparse(url).netloc and "rsc.org" not in urlparse(url).netloc:
                 continue
             ext = infer_extension(url, item["text"])
-            target = si_dir / f"{doi_to_filename(ctx.doi)}_si_{idx:03d}{ext}"
-            existing = self.existing_file_result("si", target, url, ext)
+            target = self.si_target(si_dir, ctx.doi, url, ext)
+            existing = self.existing_file_result(ctx, "si", target, url, ext)
             if existing:
                 result.si.append(existing)
                 continue
@@ -82,7 +83,9 @@ class RSCAdapter(PublisherAdapter):
                 url,
                 target,
                 min(ctx.settings.blob_download_timeout_seconds, 75),
+                link_text=item["text"],
             )
             result.si.append(self.file_result("si", path, url, "fetch_blob", extension=ext))
 
+        result.diagnostics["si_scan_complete"] = True
         return result
