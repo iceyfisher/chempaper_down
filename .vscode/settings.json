@@ -1,4 +1,6 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda"
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python.defaultInterpreterPath": "D:\\Anaconda_envs\\envs\\chem-paper-agent\\python.exe",
+    "python.terminal.activateEnvironment": true
 }

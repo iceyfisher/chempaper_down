@@ -27,7 +27,8 @@ The parent never holds a Pydoll WebSocket. If one DOI exceeds the configured har
 - Navigate DOI/article page.
 - Navigation is attempted normally first. If no article DOM appears, the Pydoll Cloudflare helper may run inside the isolated DOI subprocess. It can be disabled with `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER=0`; any helper/CDP hang remains bounded by the parent hard timeout.
 - Main PDF: authenticated browser-context `fetch → Blob → Chromium download`.
-- SI: `data-doctype="dataSupplementDoc"` / `/article-supplement/`, Blob download.
+- SI: merge `data-doctype="dataSupplementDoc"` and `/article-supplement/` links, deduplicate by source URL, then download each response.
+- Final URL, response MIME, `Content-Disposition`, original filename, and response headers are retained. Magic-byte inspection selects the real extension; HTML/JSON error pages and unknown `.bin` payloads are rejected before the final SI directory.
 
 ### RSC (`10.1039/*`)
 
@@ -45,8 +46,9 @@ await pdf_link.execute_script("this.click()", user_gesture=True)
 ```
 
 - After paper download, the adapter **always restores the original Article page** before SI discovery.
-- Every `table.support-info__table a[href]` is treated as SI.
+- Supporting Information tables, `action/downloadSupplement`, `/doi/supinfo/`, and current platform attachment links are scanned together.
 - SI URLs are collected first, then downloaded with Blob so clicking one SI cannot destroy page state.
+- Wiley uses a 600-second hard DOI budget and a 300-second per-attachment budget. Timeout cleanup still targets only the current DOI process tree.
 
 ### Springer Nature Link / SpringerLink (`10.1007/*`)
 
@@ -60,9 +62,11 @@ await pdf_link.execute_script("this.click()", user_gesture=True)
 - Official API first when `ELSEVIER_API_KEY` is configured:
   `https://api.elsevier.com/content/article/doi/{doi}` with `Accept: application/pdf`.
 - Full PDF availability depends on Elsevier entitlement/API access.
-- Browser PDF/SI discovery is intentionally isolated in `paper_tool/adapters/elsevier.py` as an experimental extension point.
+- The intended SI implementation is Elsevier Object Retrieval: enumerate DOI-associated objects, then download `STANDARD` attachments by `ref` while retaining MIME and original filename. See the [Article Retrieval API](https://dev.elsevier.com/documentation/ArticleRetrievalAPI.wadl) and [Object Retrieval API](https://dev.elsevier.com/documentation/ObjectRetrievalAPI.wadl).
+- HTTP 401/403 means insufficient authorization and 429 means quota/rate limiting; neither means "no SI".
+- `ars.els-cdn.com/*-mmcN*` browser discovery remains only an experimental fallback when the API path is unavailable. The Object Retrieval implementation is intentionally deferred until an entitled API key and test DOI are available.
 
-## Hard DOI duplicate rule
+## Resumable DOI and SI rule
 
 Before **any DOI subprocess or Edge process starts**, the parent recursively checks:
 
@@ -70,21 +74,19 @@ Before **any DOI subprocess or Edge process starts**, the parent recursively che
 downloads/**/paper/<doi_with_slash_replaced_by_underscore>.pdf
 ```
 
-A file counts as complete only if it passes PDF validation (`%PDF`, `%%EOF`, no known UTF-8 replacement-byte corruption). If valid:
+A task is complete only when the paper passes PDF validation and its existing manifest records `si_scan_complete=true` with every recorded SI file still valid and source-matched. If complete:
 
 ```text
 重复下载 跳过任务doi：10.xxxx/xxxx
 ```
 
-The DOI is not opened and SI is not re-downloaded.
-
-SI-only partial runs do not count as complete; the tool will resume the DOI and individual valid SI targets are reused.
+The duplicate result is returned without overwriting the original manifest. A missing/unknown scan state, failed SI, invalid attachment, or source mismatch resumes SI discovery even when the paper is already valid. The valid paper is retained; an SI file is reused only when its manifest source URL matches and its content still validates.
 
 ## Install
 
 ```powershell
-cd D:\code\paper_download_tool_v2
-D:\Anaconda_envs\envs\chem-paper-agent\python.exe -m pip install -e .
+cd D:\code\paper_search_agent
+D:\Anaconda_envs\envs\chem-paper-agent\python.exe -m pip install -e . --no-deps
 ```
 
 Verify console scripts:
@@ -97,6 +99,7 @@ Get-Command paper-tool-server
 If PowerShell PATH does not expose the scripts, use:
 
 ```powershell
+D:\Anaconda_envs\envs\chem-paper-agent\Scripts\paper-tool-server.exe --host 127.0.0.1 --port 8765 --download-root D:\code\paper_search_agent\downloads
 D:\Anaconda_envs\envs\chem-paper-agent\python.exe -m paper_tool.cli --help
 D:\Anaconda_envs\envs\chem-paper-agent\python.exe -m paper_tool.api --help
 ```
@@ -209,12 +212,16 @@ downloads/
 - Timeout/cancel cleanup targets only the DOI subprocess PID and descendant processes.
 - API shutdown cancels active jobs; cancellation propagates to subprocess tree cleanup.
 - A browser crash cannot poison the next DOI because the next DOI starts in a new process and Edge instance.
-- `article_timeout_seconds` is a **hard parent wall-clock budget**. Large SI may require increasing it to 180–240 s.
+- `article_timeout_seconds` is the normal hard parent wall-clock budget. Wiley DOI tasks use `PAPER_TOOL_WILEY_TIMEOUT` (default and maximum 600 s); one Wiley attachment may use up to 300 s.
 
 ## Tests
 
+Offline tests use static HTML, headers, and binary fixtures and do not access publisher domains:
+
 ```powershell
-python -m pytest -q
+D:\Anaconda_envs\envs\chem-paper-agent\python.exe -m pytest -q
 ```
 
-Browser E2E tests should be run in the same Windows `chem-paper-agent` environment where Edge/Pydoll access has already been verified.
+Live browser checks are explicit and isolated under [`manual_tests/publishers`](manual_tests/publishers/README.md). They use the same Windows `chem-paper-agent` environment, write only to the ignored `_runs/` tree, and are never part of normal pytest collection.
+
+See [`DEPENDENCY_CLEANUP.md`](DEPENDENCY_CLEANUP.md) for the non-destructive package audit. In particular, the legacy `chem-paper-agent` entry point is currently broken because its editable target no longer contains the `chem_agent` source package; that failure is not evidence that its environment dependencies can be deleted.
