@@ -1,5 +1,0 @@
-# One DOI per line; comments/prose are fine because the parser extracts DOI patterns.
-https://doi.org/10.1039/d6qo00853d
-https://doi.org/10.1021/acscatal.6c02592
-https://doi.org/10.1002/anie.2761225
-https://doi.org/10.1007/s44248-025-00082-y

@@ -1,8 +1,0 @@
-{
-  "query": "example upstream AI-agent result",
-  "papers": [
-    {"rank": 1, "doi": "10.1039/d6qo00853d", "score": 0.98},
-    {"rank": 2, "doi": "10.1002/anie.2761225", "score": 0.95},
-    {"rank": 3, "doi": "10.1007/s44248-025-00082-y", "score": 0.92}
-  ]
-}
