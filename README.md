@@ -9,6 +9,8 @@ Download article PDFs and Supporting Information (SI) from a DOI list. The proje
 ### 支持范围
 
 - ACS：`10.1021/*`
+- AIP Publishing：`10.1063/*`
+- AAAS / Science：`10.1126/*`
 - Royal Society of Chemistry：`10.1039/*`
 - Wiley：`10.1002/*`
 - Springer Nature / SpringerLink：`10.1007/*`
@@ -186,12 +188,11 @@ downloads/
 `manual_tests/publishers/` 中的脚本会实际访问出版社网站，不会被普通 `pytest` 自动收集。运行结果写入独立的 `_runs/` 目录，不会覆盖正式 `downloads/`。
 
 ```powershell
-python manual_tests\publishers\run_publishers.py `
-  --publisher acs `
-  --doi 10.1021/acscatal.6c02592
+python manual_tests\publishers\run_publishers.py --case aip_jcp_pdf_and_zip_si
+python manual_tests\publishers\run_publishers.py --case aaas_science_advances_all_si
 ```
 
-更多用例和 Wiley/Elsevier 说明见 [manual_tests/publishers/README.md](manual_tests/publishers/README.md)。
+也可以使用 `--all-enabled` 依次运行两个用例。AIP 用例检查正文 PDF 和 ZIP 格式的 SI；AAAS 用例检查阅读器页中的正文 PDF，并下载文章页发现的全部 SI。详细说明见 [manual_tests/publishers/README.md](manual_tests/publishers/README.md)。
 
 ### 常见问题
 
@@ -206,6 +207,8 @@ Edge 卡住或网页加载很慢：先把并发降到 1，再把常规超时调�
 ### Supported publishers
 
 - ACS: `10.1021/*`
+- AIP Publishing: `10.1063/*`
+- AAAS / Science: `10.1126/*`
 - Royal Society of Chemistry: `10.1039/*`
 - Wiley: `10.1002/*`
 - Springer Nature / SpringerLink: `10.1007/*`
@@ -383,12 +386,11 @@ Common statuses:
 Scripts under `manual_tests/publishers/` contact publisher websites and are not collected by normal `pytest`. Each run writes to its own `_runs/` directory and does not overwrite the main `downloads/` tree.
 
 ```powershell
-python manual_tests\publishers\run_publishers.py `
-  --publisher acs `
-  --doi 10.1021/acscatal.6c02592
+python manual_tests\publishers\run_publishers.py --case aip_jcp_pdf_and_zip_si
+python manual_tests\publishers\run_publishers.py --case aaas_science_advances_all_si
 ```
 
-See [manual_tests/publishers/README.md](manual_tests/publishers/README.md) for the configured Wiley and Elsevier cases.
+Use `--all-enabled` to run both cases in sequence. The AIP case checks the article PDF and ZIP SI. The AAAS case checks the article PDF exposed by the reader page and every SI link discovered on the article page. See [manual_tests/publishers/README.md](manual_tests/publishers/README.md) for details.
 
 ### Troubleshooting
 

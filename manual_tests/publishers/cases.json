@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "name": "aip_jcp_pdf_and_zip_si",
+      "publisher": "aip",
+      "doi": "10.1063/5.0176000",
+      "enabled": true,
+      "article_timeout_seconds": 240,
+      "expected_min_si": 1,
+      "expected_extensions": [".zip"],
+      "forbidden_extensions": [".bin"]
+    },
+    {
+      "name": "aaas_science_advances_all_si",
+      "publisher": "aaas",
+      "doi": "10.1126/sciadv.aec3536",
+      "enabled": true,
+      "article_timeout_seconds": 240,
+      "expected_min_si": 1,
+      "expected_extensions": [".pdf"],
+      "forbidden_extensions": [".bin"]
+    }
+  ]
+}
