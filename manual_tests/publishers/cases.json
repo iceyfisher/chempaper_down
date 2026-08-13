@@ -16,8 +16,8 @@
       "doi": "10.1126/sciadv.aec3536",
       "enabled": true,
       "article_timeout_seconds": 240,
-      "expected_min_si": 1,
-      "expected_extensions": [".pdf"],
+      "expected_min_si": 2,
+      "expected_extensions": [".pdf", ".zip"],
       "forbidden_extensions": [".bin"]
     }
   ]
