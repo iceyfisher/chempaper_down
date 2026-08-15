@@ -18,6 +18,8 @@ from ..storage import doi_to_filename
 
 
 WILEY_FALLBACK = {
+    "adom": "Advanced Optical Materials",
+    "aisy": "Advanced Intelligent Systems",
     "anie": "Angewandte Chemie International Edition",
 }
 
@@ -99,6 +101,17 @@ def select_wiley_si(records: list[dict]) -> list[dict]:
         seen.add(url)
         selected.append({"url": url, "text": text.strip()})
     return selected
+
+
+def wiley_direct_pdf_url(
+    article_url: str,
+    doi: str,
+    epdf_url: str | None = None,
+) -> str:
+    if epdf_url and "/doi/epdf/" in epdf_url:
+        return epdf_url.replace("/doi/epdf/", "/doi/pdfdirect/")
+    parsed = urlparse(article_url)
+    return f"{parsed.scheme}://{parsed.netloc}/doi/pdfdirect/{doi}"
 
 
 async def download_wiley_attachment(
@@ -191,10 +204,21 @@ class WileyAdapter(PublisherAdapter):
             raise RuntimeError("Wiley article page could not be restored for SI")
 
     async def run(self, ctx: AdapterContext) -> ArticleResult:
-        article_url = await self.navigate(ctx)
+        article_url = await self.navigate(ctx, cloudflare=True)
         tab = ctx.tab
         suffix = ctx.doi.split("/", 1)[-1]
         fallback = WILEY_FALLBACK.get(suffix.split(".", 1)[0].lower(), "Unknown Journal")
+        access_issue = await self.access_issue(tab)
+        if access_issue:
+            return ArticleResult(
+                doi=ctx.doi,
+                publisher=self.publisher_name,
+                journal=fallback,
+                article_url=article_url,
+                title=await tab.title,
+                message=access_issue,
+                diagnostics={"access_issue": "publisher_challenge"},
+            )
         journal = await self.journal_from_meta(tab, fallback)
         _, paper_dir, si_dir = self.dirs(ctx, journal)
         result = ArticleResult(
@@ -207,6 +231,7 @@ class WileyAdapter(PublisherAdapter):
 
         result.paper = self.existing_paper_result(ctx)
         reader_tab = None
+        epdf_url = None
         if result.paper is None:
             epdf = None
             for selector in (
@@ -219,6 +244,10 @@ class WileyAdapter(PublisherAdapter):
                     break
 
             if epdf:
+                epdf_url = urljoin(
+                    await tab.current_url,
+                    epdf.get_attribute("href") or "",
+                )
                 old_tabs = await ctx.browser.get_opened_tabs()
                 old_ids = {tab_identity(x) for x in old_tabs}
                 try:
@@ -264,6 +293,31 @@ class WileyAdapter(PublisherAdapter):
         # Critical: paper flow may leave the main tab in the ePDF reader. Always
         # restore the original article before discovering/downloading SI.
         await self._restore_article(ctx, article_url)
+
+        if result.paper is None or not result.paper.valid:
+            direct_pdf_url = wiley_direct_pdf_url(
+                article_url,
+                ctx.doi,
+                epdf_url,
+            )
+            target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
+            path, method = await download_wiley_attachment(
+                tab,
+                ctx.worker,
+                direct_pdf_url,
+                target,
+                min(ctx.settings.wiley_article_timeout_seconds, 180),
+                link_text="Download PDF",
+                extension=".pdf",
+            )
+            result.diagnostics["wiley_direct_pdf_fallback"] = method
+            result.paper = self.file_result(
+                "paper",
+                path,
+                direct_pdf_url,
+                method,
+                extension=".pdf",
+            )
 
         await tab.query(
             'table.support-info__table, a[href*="action/downloadSupplement"], a[href*="-sup-"]',

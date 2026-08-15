@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 
 from .base import AdapterContext, PublisherAdapter
 from ..download import OriginBridgeManager, blob_download, native_navigation_download
-from ..models import ArticleResult
+from ..models import ArticleResult, FileResult
 from ..resources import IMAGE_EXTENSIONS, infer_extension
 from ..storage import doi_to_filename
 
@@ -84,6 +84,8 @@ def _score(item: dict) -> int:
     score = {"file_heading": 100, "supplement_section": 70, "global_esm_url": 45, "global_supp_text": 30}.get(source, 0)
     if "supplementary file" in text:
         score += 60
+    if "supplementary information" in text:
+        score += 60
     if "supplementary material" in text:
         score += 40
     if "/springer-static/esm/" in url:
@@ -93,6 +95,20 @@ def _score(item: dict) -> int:
     if item.get("text", "").strip().lower() == "image":
         score -= 100
     return score
+
+
+def select_springer_pdf(items: list[dict]) -> dict | None:
+    for item in items:
+        url = str(item.get("url") or item.get("href") or "")
+        text = str(item.get("text") or "").lower()
+        path = url.split("?", 1)[0].lower()
+        if (
+            "/content/pdf/" in path
+            or ("/articles/" in path and path.endswith(".pdf"))
+            or ("download pdf" in text and path.endswith(".pdf"))
+        ):
+            return item
+    return None
 
 
 def _select_si(records: list[dict]) -> list[dict]:
@@ -132,12 +148,25 @@ class SpringerAdapter(PublisherAdapter):
 
     @classmethod
     def matches_doi(cls, doi: str) -> bool:
-        return doi.startswith("10.1007/")
+        return doi.startswith(("10.1007/", "10.1038/"))
 
     async def run(self, ctx: AdapterContext) -> ArticleResult:
         article_url = await self.navigate(ctx)
         tab = ctx.tab
-        pdf_element = await tab.query('a[href*="/content/pdf/"]', timeout=25, raise_exc=False)
+        pdf_selector = (
+            'a[href*="/content/pdf/"], '
+            'a[data-track-action="download pdf"][href], '
+            'a[href*="/articles/"][href$=".pdf"]'
+        )
+        pdf_links = await self.collect_links(tab, pdf_selector)
+        citation_pdf = await tab.query(
+            'meta[name="citation_pdf_url"]', timeout=2, raise_exc=False
+        )
+        if citation_pdf:
+            content = citation_pdf.get_attribute("content") or ""
+            if content:
+                pdf_links.append({"url": urljoin(article_url, content), "text": "citation PDF"})
+        pdf_item = select_springer_pdf(pdf_links)
         journal = await self.journal_from_meta(tab, "Unknown Journal")
         _, paper_dir, si_dir = self.dirs(ctx, journal)
         result = ArticleResult(
@@ -149,9 +178,8 @@ class SpringerAdapter(PublisherAdapter):
         )
 
         result.paper = self.existing_paper_result(ctx)
-        if result.paper is None and pdf_element:
-            href = pdf_element.get_attribute("href") or ""
-            pdf_url = urljoin(await tab.current_url, href)
+        if result.paper is None and pdf_item:
+            pdf_url = pdf_item["url"]
             target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
             # Verified SpringerLink behavior: direct navigation is faster and
             # reliable; ERR_ABORTED is expected when Chromium hands off download.
@@ -161,16 +189,23 @@ class SpringerAdapter(PublisherAdapter):
             )
             result.paper = self.file_result("paper", path, pdf_url, "native_navigation", extension=".pdf")
 
-        # Ensure article page remained/restored before SI discovery.
-        marker = await tab.query('a[href*="/content/pdf/"]', timeout=2, raise_exc=False)
-        if not marker:
-            try:
-                await tab.go_to(article_url)
-            except Exception:
-                pass
-            await tab.query('a[href*="/content/pdf/"]', timeout=20, raise_exc=False)
-
-        raw = await tab.execute_script(DISCOVERY_JS, return_by_value=True)
+        # The PDF downloader uses a separate temporary tab, so the article tab
+        # remains the correct SI discovery context. Avoid another CDP selector
+        # wait here: real Nature pages have occasionally stalled Runtime.evaluate
+        # during this redundant probe.
+        try:
+            raw = await tab.execute_script(DISCOVERY_JS, return_by_value=True)
+        except Exception as exc:
+            result.si.append(
+                FileResult(
+                    kind="si",
+                    valid=False,
+                    error=f"si_discovery_failed: {type(exc).__name__}",
+                )
+            )
+            result.diagnostics["si_scan_complete"] = False
+            result.diagnostics["si_discovery_error"] = repr(exc)
+            return result
         data = _unwrap(raw) or {}
         selected = _select_si(data.get("records", []))
         result.diagnostics["springer_raw_si_candidates"] = len(data.get("records", []))

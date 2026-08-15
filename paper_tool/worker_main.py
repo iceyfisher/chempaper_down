@@ -10,7 +10,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pydoll.exceptions import WebSocketConnectionClosed
+from pydoll.exceptions import BrowserException, ConnectionException
 
 from .adapters.base import AdapterContext
 from .browser import BrowserWorker
@@ -33,7 +33,25 @@ def event(stage: str, message: str, **extra) -> None:
 def finalize_status(result: ArticleResult) -> ItemStatus:
     paper_ok = bool(result.paper and result.paper.valid)
     if not paper_ok:
+        if not result.message:
+            if result.paper and result.paper.error:
+                result.message = (
+                    "Main article PDF was discovered but download or validation "
+                    f"failed: {result.paper.error}"
+                )
+            else:
+                result.message = (
+                    "Publisher page loaded, but no authorized main article PDF "
+                    "was discovered."
+                )
         return ItemStatus.FAILED
+    if result.diagnostics.get("si_scan_complete") is False:
+        if not result.message:
+            result.message = (
+                "Main article PDF is valid, but Supporting Information discovery "
+                "did not complete."
+            )
+        return ItemStatus.PARTIAL
     return ItemStatus.PARTIAL if any(not x.valid for x in result.si) else ItemStatus.SUCCESS
 
 
@@ -89,15 +107,23 @@ async def run_one(request_path: Path, result_path: Path) -> int:
         event("browser_start", "Starting isolated Edge process", publisher=adapter.key)
         await worker.start()
         event("adapter", f"Running {adapter.key} adapter")
-        result = await adapter.run(
-            AdapterContext(
-                worker=worker,
-                settings=settings,
-                doi=doi,
-                existing_paper=existing if resume_si else None,
-                previous_manifest=payload.get("previous_manifest"),
-            )
+        ctx = AdapterContext(
+            worker=worker,
+            settings=settings,
+            doi=doi,
+            existing_paper=existing if resume_si else None,
+            previous_manifest=payload.get("previous_manifest"),
         )
+        result = await adapter.run(ctx)
+        result.diagnostics = {
+            **ctx.navigation_diagnostics,
+            **(result.diagnostics or {}),
+        }
+        if not (result.paper and result.paper.valid) and not result.message:
+            access_issue = await adapter.access_issue(worker.main_tab)
+            if access_issue:
+                result.message = access_issue
+                result.diagnostics["access_issue"] = "publisher_challenge"
         result.status = finalize_status(result)
         result.started_at = start_iso
         result.finished_at = now_iso()
@@ -111,11 +137,11 @@ async def run_one(request_path: Path, result_path: Path) -> int:
         )
         write_json_atomic(result_path, result.to_dict())
         return 0 if result.status in {ItemStatus.SUCCESS, ItemStatus.PARTIAL} else 1
-    except WebSocketConnectionClosed as exc:
+    except (ConnectionError, ConnectionException, BrowserException) as exc:
         result = ArticleResult(
             doi=doi,
             status=ItemStatus.BROWSER_CRASHED,
-            message=f"Pydoll WebSocket closed: {exc!r}",
+            message=f"Pydoll/Edge connection was lost: {exc!r}",
             started_at=start_iso,
             finished_at=now_iso(),
             elapsed_seconds=round(time.monotonic() - started, 3),

@@ -14,7 +14,7 @@ Download article PDFs and Supporting Information (SI) from a DOI list. The proje
 - Royal Society of Chemistry：`10.1039/*`
 - Wiley：`10.1002/*`
 - Springer Nature / SpringerLink：`10.1007/*`
-- Elsevier / ScienceDirect：`10.1016/*`，正文优先使用官方 API，SI 浏览器路径目前是降级方案
+- Elsevier / ScienceDirect：`10.1016/*`，正文仅使用官方 Article Retrieval API；SI 仅使用 PII 推导的公开 `ars.els-cdn.com` PII/mmc 地址
 
 下载器会识别 PDF、ZIP、Office 文件、图片和视频等常见 SI 格式。HTML 错误页、JSON 错误响应和无法识别的 `.bin` 不会写入最终 SI 目录。
 
@@ -152,13 +152,23 @@ POST /api/jobs/<job_id>/cancel
 
 ### Elsevier
 
-Elsevier 正文使用官方 Article Retrieval API。运行前在当前终端设置 key：
+Elsevier 正文仅使用官方 Article Retrieval API。SI 从论文 PII 构造公开的 `ars.els-cdn.com/content/image/1-s2.0-<PII>-mmcN.<扩展名>` 地址下载。运行前必须在启动服务的同一个终端设置 key：
+
+推荐将长期配置写入项目根目录的 `.env`（该文件已被 Git 忽略）：
+
+```dotenv
+ELSEVIER_API_KEY=your-key
+PAPER_TOOL_ELSEVIER_TIMEOUT=600
+```
+
+服务和 DOI 子进程会自动读取启动工作目录中的 `.env`。已经存在的系统环境变量优先，不会被 `.env` 覆盖。也可以只为当前终端临时设置：
 
 ```powershell
 $env:ELSEVIER_API_KEY = "your-key"
+$env:PAPER_TOOL_ELSEVIER_TIMEOUT = "600"
 ```
 
-401/403 表示当前 key 或账号没有相应权限；429 表示配额或请求频率受限。这些状态不能解释成“文章没有 SI”。
+API key 只通过服务进程环境传给 DOI 子进程，不会写入源码、结果 JSON 或 `_worker_runs/request.json`。程序先从 Article Retrieval API 的 JSON/XML 元数据提取 PII，缺失时再用 Article Metadata API 按 DOI 查询；浏览器只作为最后的 PII 元数据回退，不用于下载正文或 SI。正文 PDF 请求使用 `httpAccept=application/pdf`，不强制可能因权限产生 400 的 `view=FULL`。SI 的有限 PII/mmc 探测正常完成且得到 0 个候选时，表示已确认没有 SI，`0/0` 可以成为完整 bundle；缺少 PII、401/403/429 或网络错误则属于扫描未完成，不能解释成“文章没有 SI”。
 
 ### 下载结果
 
@@ -212,7 +222,7 @@ Edge 卡住或网页加载很慢：先把并发降到 1，再把常规超时调�
 - Royal Society of Chemistry: `10.1039/*`
 - Wiley: `10.1002/*`
 - Springer Nature / SpringerLink: `10.1007/*`
-- Elsevier / ScienceDirect: `10.1016/*`; the official API is preferred for article PDFs, while browser-based SI discovery remains a fallback
+- Elsevier / ScienceDirect: `10.1016/*`; article PDFs use only the official Article Retrieval API, and SI uses only public `ars.els-cdn.com` PII/mmc URLs derived from the article PII
 
 The downloader recognizes common SI formats such as PDF, ZIP, Office documents, images, and video. HTML error pages, JSON error responses, and unknown `.bin` payloads are rejected before they reach the final SI directory.
 
@@ -350,13 +360,23 @@ POST /api/jobs/<job_id>/cancel
 
 ### Elsevier
 
-Elsevier article PDFs use the official Article Retrieval API. Set the key in the current shell before starting the server or CLI:
+Elsevier article PDFs use only the official Article Retrieval API. SI is downloaded from public `ars.els-cdn.com/content/image/1-s2.0-<PII>-mmcN.<extension>` URLs derived from the article PII. Set the key in the same shell that starts the server or CLI:
+
+For persistent configuration, create `.env` in the project root (the file is already ignored by Git):
+
+```dotenv
+ELSEVIER_API_KEY=your-key
+PAPER_TOOL_ELSEVIER_TIMEOUT=600
+```
+
+The server and DOI subprocesses automatically read `.env` from their startup working directory. Existing process environment variables take precedence and are not overwritten. Alternatively, configure only the current shell:
 
 ```powershell
 $env:ELSEVIER_API_KEY = "your-key"
+$env:PAPER_TOOL_ELSEVIER_TIMEOUT = "600"
 ```
 
-HTTP 401/403 means the key or account lacks the required entitlement. HTTP 429 means a quota or rate limit was reached. None of these responses means that the article has no SI.
+The API key is inherited through the server process environment and is never serialized into source code, result JSON, or `_worker_runs/request.json`. PII is extracted from Article Retrieval API JSON/XML metadata, then resolved by a DOI lookup through Article Metadata API if necessary; the browser is only the final metadata fallback and does not download the article or SI. PDF requests use `httpAccept=application/pdf` without forcing the entitlement-sensitive `view=FULL`. A bounded PII/mmc scan that finishes with zero candidates is an authoritative no-SI result, so `0/0` is a complete bundle. A missing PII, HTTP 401/403/429, or network failure leaves the SI scan incomplete and is not treated as no SI.
 
 ### Output
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from .base import AdapterContext, PublisherAdapter
 from ..download import DownloadArtifact, blob_download, native_navigation_download
@@ -24,7 +24,8 @@ def _unique_links(items: list[dict]) -> list[dict]:
 
 def select_aip_pdf(items: list[dict]) -> dict | None:
     for item in _unique_links(items):
-        if "/article-pdf/" in str(item.get("url") or ""):
+        url = str(item.get("url") or "")
+        if "/article-pdf/" in url or url.split("?", 1)[0].lower().endswith(".pdf"):
             return item
     return None
 
@@ -110,14 +111,33 @@ class AIPAdapter(PublisherAdapter):
         )
 
         result.paper = self.existing_paper_result(ctx)
+        current_url = await tab.current_url
+        abstract_only = "/article-abstract/" in current_url
+        if abstract_only and result.paper is None:
+            result.message = (
+                "AIP redirected this session to the abstract-only page; "
+                "authorized subscription access is required for the main PDF."
+            )
+            result.diagnostics["aip_access"] = "abstract_only"
         if result.paper is None:
             candidates = await self.collect_links(
                 tab,
-                'a[data-doctype="contentPdf"][href*="/article-pdf/"], '
-                'a.article-pdfLink[href*="/article-pdf/"]',
+                'a[data-doctype="contentPdf"][href], '
+                'a.article-pdfLink[href], '
+                'a[href*="/article-pdf/"]',
             )
+            citation_pdf = await tab.query(
+                'meta[name="citation_pdf_url"]', timeout=2, raise_exc=False
+            )
+            if citation_pdf:
+                content = citation_pdf.get_attribute("content") or ""
+                if content:
+                    candidates.append(
+                        {"url": urljoin(article_url, content), "text": "citation PDF"}
+                    )
             paper = select_aip_pdf(candidates)
-            if paper:
+            result.diagnostics["aip_pdf_candidates"] = len(candidates)
+            if paper and not abstract_only:
                 pdf_url = paper["url"]
                 target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
                 path, method = await _download(ctx, pdf_url, target, ".pdf")
@@ -154,4 +174,18 @@ class AIPAdapter(PublisherAdapter):
             )
 
         result.diagnostics["si_scan_complete"] = True
+        if result.paper is None and not result.message:
+            try:
+                raw_text = await tab.execute_script(
+                    "return document.body ? document.body.innerText.slice(0, 12000) : '';",
+                    return_by_value=True,
+                )
+            except Exception:
+                raw_text = ""
+            visible = str(raw_text).lower()
+            if "available to purchase" in visible:
+                result.message = (
+                    "AIP article is available to purchase; the current browser "
+                    "session has no authorized PDF access."
+                )
         return result
