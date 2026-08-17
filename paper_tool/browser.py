@@ -92,6 +92,7 @@ class BrowserWorker:
     async def start(self) -> "BrowserWorker":
         self.clear_staging()
         options = ChromiumOptions()
+        options.headless = True
         options.set_default_download_directory(str(self.staging_dir.resolve()))
         options.prompt_for_download = False
         options.allow_automatic_downloads = True
