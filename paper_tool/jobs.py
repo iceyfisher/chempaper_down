@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -75,7 +76,6 @@ class JobManager:
         if path.exists():
             # Persisted jobs are readable after API restart even though they cannot
             # be resumed automatically.
-            import json
             data = json.loads(path.read_text(encoding="utf-8"))
             recovered = JobState(
                 id=data["id"],
@@ -99,6 +99,8 @@ class JobManager:
         *,
         max_concurrency: int | None = None,
         article_timeout_seconds: int | None = None,
+        download_si: bool = True,
+        article_hints: dict[str, dict] | None = None,
     ) -> JobState:
         job_id = uuid.uuid4().hex[:12]
         job = JobState(id=job_id, dois=dois, total=len(dois))
@@ -108,7 +110,10 @@ class JobManager:
             max_concurrency=max_concurrency,
             article_timeout_seconds=article_timeout_seconds,
         )
-        self.tasks[job_id] = asyncio.create_task(self._run(job, settings), name=f"paper-job-{job_id}")
+        self.tasks[job_id] = asyncio.create_task(
+            self._run(job, settings, download_si, article_hints),
+            name=f"paper-job-{job_id}",
+        )
         return job
 
     async def cancel(self, job_id: str) -> bool:
@@ -128,7 +133,13 @@ class JobManager:
             self._save(job)
         return True
 
-    async def _run(self, job: JobState, settings: Settings):
+    async def _run(
+        self,
+        job: JobState,
+        settings: Settings,
+        download_si: bool = True,
+        article_hints: dict[str, dict] | None = None,
+    ):
         job.status = "running"
         job.started_at = now_iso()
         self._save(job)
@@ -144,7 +155,12 @@ class JobManager:
 
         try:
             service = DownloadService(settings)
-            await service.run_batch(job.dois, callback=progress)
+            await service.run_batch(
+                job.dois,
+                callback=progress,
+                download_si=download_si,
+                article_hints=article_hints,
+            )
             job.status = "completed"
         except asyncio.CancelledError:
             job.status = "cancelled"

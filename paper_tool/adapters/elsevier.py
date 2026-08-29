@@ -129,9 +129,12 @@ def parse_article_metadata(payload: dict | None) -> dict[str, str]:
         or _find_pii_in_payload(response)
         or ""
     )
+    cover_date = _record_value(core, "prism:coverDate", "coverDate")
+    date_match = re.search(r"(19|20)\d{2}", cover_date or "")
     return {
         "title": _record_value(core, "dc:title", "title"),
         "journal": _record_value(core, "prism:publicationName", "publicationName"),
+        "year": date_match.group(0) if date_match else "",
         "pii": pii,
         "article_url": article_url,
     }
@@ -513,6 +516,7 @@ class ElsevierAdapter(PublisherAdapter):
 
             article_url = metadata.get("article_url") or f"https://doi.org/{ctx.doi}"
             journal = metadata.get("journal") or "Unknown Journal"
+            year = metadata.get("year") or None
             title = metadata.get("title") or None
             pii = metadata.get("pii") or None
             pii_source = "article_retrieval_metadata" if pii else None
@@ -536,6 +540,7 @@ class ElsevierAdapter(PublisherAdapter):
                 search_metadata = parse_article_metadata(search_payload)
                 article_url = search_metadata.get("article_url") or article_url
                 journal = search_metadata.get("journal") or journal
+                year = search_metadata.get("year") or year
                 title = search_metadata.get("title") or title
                 pii = search_metadata.get("pii") or pii
                 if pii:
@@ -545,6 +550,7 @@ class ElsevierAdapter(PublisherAdapter):
                 article_url = await self.navigate(ctx, cloudflare=True)
                 browser_navigated = True
                 journal = await self.journal_from_meta(ctx.tab, journal)
+                year = year or await self.year_from_meta(ctx.tab)
                 try:
                     title = title or await asyncio.wait_for(ctx.tab.title, timeout=3)
                 except Exception as exc:
@@ -560,11 +566,12 @@ class ElsevierAdapter(PublisherAdapter):
                     f"{pii}"
                 )
 
-            _, paper_dir, si_dir = self.dirs(ctx, journal)
+            _, paper_dir, si_dir = self.dirs(ctx, journal, year)
             result = ArticleResult(
                 doi=ctx.doi,
                 publisher=self.publisher_name,
                 journal=journal,
+                year=year,
                 article_url=article_url,
                 title=title,
             )
@@ -612,7 +619,10 @@ class ElsevierAdapter(PublisherAdapter):
             probe_count = 0
             probe_error = "pii_unavailable"
             candidates: list[dict[str, str]] = []
-            if pii:
+            if not ctx.want_si:
+                probe_error = None
+                result.diagnostics["elsevier_si_scan"] = "disabled_by_request"
+            elif pii:
                 candidates, probe_count, probe_error = await self._probe_public_mmc(
                     client,
                     pii,

@@ -42,6 +42,7 @@ class ArticleResult:
     status: ItemStatus = ItemStatus.PENDING
     publisher: str | None = None
     journal: str | None = None
+    year: str | None = None
     article_url: str | None = None
     title: str | None = None
     paper: FileResult | None = None
@@ -76,6 +77,7 @@ class ArticleResult:
             status=ItemStatus(data.get("status", "pending")),
             publisher=data.get("publisher"),
             journal=data.get("journal"),
+            year=data.get("year"),
             article_url=data.get("article_url"),
             title=data.get("title"),
             paper=paper,

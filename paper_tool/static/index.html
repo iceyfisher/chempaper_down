@@ -3,88 +3,480 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Paper Download Tool</title>
+  <title>Paper Downloader · 论文批量下载</title>
   <style>
-    :root{color-scheme:light dark;--bg:#f6f7f9;--panel:#fff;--text:#15171a;--muted:#68707a;--border:#dfe3e8;--accent:#2563eb;--good:#15803d;--bad:#b91c1c;--warn:#a16207}
-    @media(prefers-color-scheme:dark){:root{--bg:#111315;--panel:#191c20;--text:#f3f4f6;--muted:#a9b0b8;--border:#30363d;--accent:#60a5fa;--good:#4ade80;--bad:#f87171;--warn:#facc15}}
-    *{box-sizing:border-box} html{scroll-behavior:smooth}body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
-    main{max-width:1200px;margin:0 auto;padding:28px 18px 56px} h1{margin:0 0 6px;font-size:26px} h2{font-size:17px;margin:0 0 14px} p{color:var(--muted)}
-    .grid{display:grid;grid-template-columns:1.08fr .92fr;gap:18px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease}.panel:hover{border-color:color-mix(in srgb,var(--accent) 38%,var(--border));box-shadow:0 10px 28px color-mix(in srgb,var(--text) 8%,transparent);transform:translateY(-1px)}
-    textarea,input,select{width:100%;border:1px solid var(--border);border-radius:10px;background:transparent;color:inherit;padding:10px 12px;font:inherit;transition:border-color .16s ease,box-shadow .16s ease}textarea:focus,input:focus,select:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}textarea{min-height:190px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
-    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
-    button{border:0;border-radius:10px;padding:11px 15px;background:var(--accent);color:white;font-weight:650;cursor:pointer;transition:transform .14s ease,filter .14s ease,box-shadow .14s ease}button:hover:not(:disabled){filter:brightness(1.06);transform:translateY(-1px);box-shadow:0 5px 14px color-mix(in srgb,var(--accent) 24%,transparent)}button:active:not(:disabled){transform:translateY(0)}button:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 30%,transparent);outline-offset:2px}button:disabled{opacity:.55;cursor:not-allowed}.secondary{background:transparent;color:var(--text);border:1px solid var(--border)}.danger{background:var(--bad)}
-    .actions{display:flex;gap:10px;margin-top:15px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.stat{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:13px}.stat b{display:block;font-size:23px;margin-top:3px}.stat span{color:var(--muted);font-size:12px}
-    .hint{font-size:12px;line-height:1.55;color:var(--muted)}.supported{display:flex;gap:7px;flex-wrap:wrap}.chip{border:1px solid var(--border);border-radius:999px;padding:5px 9px;font-size:12px;transition:border-color .15s ease,background .15s ease}.chip:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent)}
-    .callout{border-left:4px solid var(--accent);padding:10px 12px;background:color-mix(in srgb,var(--accent) 8%,transparent);border-radius:8px;font-size:13px;color:var(--muted);margin-top:12px;transition:background .18s ease,transform .18s ease}.callout.changed{background:color-mix(in srgb,var(--accent) 15%,transparent);transform:translateX(2px)}
-    .table-wrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:var(--panel)}table{border-collapse:collapse;width:100%;min-width:980px}th,td{padding:10px 11px;border-bottom:1px solid var(--border);text-align:left;font-size:13px;vertical-align:top}th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-size:12px}tbody tr{transition:background .14s ease}tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
-    .status{font-weight:700}.success,.skipped_duplicate{color:var(--good)}.failed,.timeout,.browser_crashed,.process_error{color:var(--bad)}.partial{color:var(--warn)}.running{color:var(--accent)}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}#message{min-height:22px;font-size:13px;color:var(--muted);margin-top:10px}
-    @media(max-width:800px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.panel,button,textarea,input,select,.chip,.callout,tbody tr{transition:none}.panel:hover{transform:none}}
+    /* ============ Neo-Brutalist design tokens ============ */
+    :root{
+      --ink:#111111; --paper:#f4f1ea; --card:#ffffff;
+      --yellow:#ffc900; --red:#ff5252; --blue:#4d9de0;
+      --green:#00c48c; --purple:#9b7bff; --muted:#5c5850;
+      --shadow:4px 4px 0 var(--ink); --shadow-lg:6px 6px 0 var(--ink);
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:var(--paper);color:var(--ink);
+      font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+      background-image:radial-gradient(rgba(17,17,17,.07) 1.2px,transparent 1.2px);
+      background-size:22px 22px;}
+    main{max-width:1180px;margin:0 auto;padding:26px 18px 70px}
+
+    /* ============ Brutal primitives ============ */
+    .b-card{position:relative;background:var(--card);border:3px solid var(--ink);
+      box-shadow:var(--shadow-lg);border-radius:0;margin-bottom:22px}
+    .b-card>.strip{height:10px;border-bottom:3px solid var(--ink)}
+    .strip.y{background:var(--yellow)}.strip.b{background:var(--blue)}
+    .strip.r{background:var(--red)}.strip.g{background:var(--green)}.strip.p{background:var(--purple)}
+    .b-card .body{padding:16px 18px 18px}
+
+    .b-btn{display:inline-flex;align-items:center;gap:6px;border:3px solid var(--ink);
+      background:var(--card);color:var(--ink);font-weight:800;font-size:13px;
+      padding:9px 14px;cursor:pointer;box-shadow:var(--shadow);border-radius:0;
+      text-transform:uppercase;letter-spacing:.03em;line-height:1.2;
+      transition:box-shadow .06s ease,transform .06s ease;user-select:none}
+    .b-btn:hover:not(:disabled){background:var(--yellow)}
+    .b-btn:active:not(:disabled){box-shadow:2px 2px 0 var(--ink);transform:translate(2px,2px)}
+    .b-btn:disabled{opacity:.45;cursor:not-allowed}
+    .b-btn.primary{background:var(--yellow)}
+    .b-btn.primary:hover:not(:disabled){background:#ffd83d}
+    .b-btn.secondary{background:var(--card)}
+    .b-btn.danger{background:var(--red);color:#fff}
+    .b-btn.danger:hover:not(:disabled){background:#ff6b6b}
+    .b-btn.small{padding:5px 9px;font-size:11px;border-width:2px;box-shadow:3px 3px 0 var(--ink)}
+    .b-btn.small:active:not(:disabled){box-shadow:1px 1px 0 var(--ink);transform:translate(2px,2px)}
+
+    .b-input,.b-select,textarea.b-input{width:100%;border:0;border-bottom:3px solid var(--ink);
+      border-radius:0;background:transparent;color:var(--ink);padding:9px 4px;
+      font:inherit;font-size:14px;outline:none}
+    .b-input::placeholder,textarea.b-input::placeholder{font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;
+      font-size:12.5px;color:#8f8a80}
+    .b-input:focus,textarea.b-input:focus{background:#fffdf4}
+    textarea.b-input{min-height:150px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px}
+    .b-select{width:auto;border:3px solid var(--ink);background:var(--card);
+      font-weight:700;padding:8px 10px;cursor:pointer;box-shadow:var(--shadow)}
+    label{display:block;font-size:12px;font-weight:800;text-transform:uppercase;
+      letter-spacing:.06em;margin:0 0 5px;color:var(--muted)}
+
+    .b-badge{display:inline-block;border:2px solid var(--ink);border-radius:0;
+      text-transform:uppercase;font-size:10px;font-weight:800;letter-spacing:.05em;
+      padding:2px 7px;background:var(--card);vertical-align:middle}
+    .b-badge.y{background:var(--yellow)}.b-badge.b{background:var(--blue);color:#fff}
+    .b-badge.r{background:var(--red);color:#fff}.b-badge.g{background:var(--green)}
+    .b-badge.p{background:var(--purple);color:#fff}.b-badge.w{background:#fff}
+
+    /* ============ header / tabs ============ */
+    header.hero h1{margin:0;font-size:34px;font-weight:900;letter-spacing:.5px;text-transform:uppercase}
+    header.hero p{margin:8px 0 0;color:var(--muted);font-size:13px}
+    .hero-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+    nav.tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px}
+    nav.tabs .b-btn{box-shadow:var(--shadow)}
+    nav.tabs .b-btn[aria-selected="true"]{background:var(--ink);color:var(--yellow)}
+
+    .row{display:grid;gap:14px}
+    .row.two{grid-template-columns:1fr 1fr}
+    .row.three{grid-template-columns:1fr 1fr 1fr}
+    .row.four{grid-template-columns:repeat(4,1fr)}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .field{margin-bottom:14px}
+
+    /* ============ stats ============ */
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+    .stat{background:var(--card);border:3px solid var(--ink);box-shadow:var(--shadow);
+      padding:12px 14px;border-top:8px solid var(--ink)}
+    .stat:nth-child(1){border-top-color:var(--yellow)}
+    .stat:nth-child(2){border-top-color:var(--green)}
+    .stat:nth-child(3){border-top-color:var(--blue)}
+    .stat:nth-child(4){border-top-color:var(--purple)}
+    .stat b{display:block;font-size:24px;margin-top:2px}
+    .stat span{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+
+    /* ============ search result rows ============ */
+    .hit{border:3px solid var(--ink);background:var(--card);box-shadow:var(--shadow);
+      padding:12px 14px;margin-bottom:14px}
+    .hit h3{margin:0 0 6px;font-size:15px;line-height:1.45}
+    .hit .meta{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px;font-size:12px;color:var(--muted)}
+    .hit .btns{display:flex;gap:8px;flex-wrap:wrap}
+    .hit .doi-code{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--paper);
+      border:2px solid var(--ink);padding:1px 6px;display:inline-block;margin:2px 0 6px}
+    .checkline{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700}
+
+    /* ============ table ============ */
+    .table-wrap{overflow:auto;border:3px solid var(--ink);box-shadow:var(--shadow-lg);background:var(--card)}
+    table{border-collapse:collapse;width:100%;min-width:960px}
+    th,td{padding:9px 10px;border-bottom:2px solid var(--ink);text-align:left;font-size:12.5px;vertical-align:top}
+    th{background:var(--yellow);text-transform:uppercase;font-size:11px;letter-spacing:.05em;
+      border-bottom:3px solid var(--ink);position:sticky;top:0}
+    tbody tr:hover{background:#fffbe8}
+    code{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+    .status{font-weight:800;text-transform:uppercase;font-size:11px}
+    .success,.skipped_duplicate{color:#0a7f5b}.failed,.timeout,.browser_crashed,.process_error{color:#c62828}
+    .partial{color:#9a6b00}.running{color:#1565c0}
+
+    /* ============ toast + modal ============ */
+    #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:60;
+      display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+    .toast-item{background:var(--ink);color:#fff;border:3px solid var(--ink);
+      box-shadow:var(--shadow);padding:9px 16px;font-size:13px;font-weight:700;max-width:80vw}
+    .toast-item.err{background:var(--red)}
+
+    .modal-overlay{position:fixed;inset:0;background:rgba(17,17,17,.55);z-index:70;
+      display:none;align-items:center;justify-content:center}
+    .modal-overlay.open{display:flex}
+    .modal{background:var(--card);border:3px solid var(--ink);box-shadow:8px 8px 0 var(--ink);
+      max-width:520px;width:92vw;padding:20px}
+    .modal h3{margin:0 0 10px;font-size:17px;text-transform:uppercase}
+    .modal p{font-size:13px;line-height:1.6;color:var(--muted);margin:0 0 16px}
+
+    .hint{font-size:12px;line-height:1.7;color:var(--muted)}
+    .hint b{color:var(--ink)}
+    .divider{border-top:3px dashed var(--ink);margin:16px 0;opacity:.35}
+    @media(max-width:860px){.row.two,.row.three,.row.four,.stats{grid-template-columns:1fr 1fr}}
+    @media(max-width:560px){.row.two,.row.three,.row.four,.stats{grid-template-columns:1fr}}
+    @media(prefers-reduced-motion:reduce){.b-btn{transition:none}}
   </style>
 </head>
 <body>
 <main>
-  <h1>Paper Download Tool</h1>
-  <p>批量下载论文正文和补充材料。粘贴 DOI，也可以上传清单。</p>
+  <header class="hero">
+    <h1>📄 Paper Downloader</h1>
+    <p>DOI / 文章标题 → 自动下载论文原文与补充材料（SI），支持 OpenAlex 检索与知网（CNKI）检索。</p>
+    <div class="hero-badges">
+      <span class="b-badge y">OpenAlex</span><span class="b-badge r">知网 CNKI</span>
+      <span class="b-badge w">ACS</span><span class="b-badge w">AIP</span><span class="b-badge w">AAAS / Science</span>
+      <span class="b-badge w">RSC</span><span class="b-badge w">Wiley</span><span class="b-badge w">Springer</span>
+      <span class="b-badge w">Elsevier</span><span class="b-badge g">校园网权限</span>
+    </div>
+  </header>
 
-  <div class="grid">
-    <section class="panel">
-      <h2>直接输入 DOI</h2>
-      <label for="doiText">DOI、DOI URL 或上游 Agent 输出文本</label>
-      <textarea id="doiText" placeholder="10.1021/...&#10;https://doi.org/10.1002/...&#10;10.1007/..."></textarea>
-      <div class="actions"><button id="startText">开始批量下载</button><button id="clearText" class="secondary">清空</button></div>
-    </section>
+  <div style="height:20px"></div>
+  <nav class="tabs" role="tablist">
+    <button class="b-btn" role="tab" data-tab="tab-doi" aria-selected="true">① DOI 批量下载</button>
+    <button class="b-btn" role="tab" data-tab="tab-search" aria-selected="false">② 学术标题检索</button>
+    <button class="b-btn" role="tab" data-tab="tab-cnki" aria-selected="false">③ 知网检索</button>
+    <button class="b-btn" role="tab" data-tab="tab-jobs" aria-selected="false">④ 任务与结果</button>
+  </nav>
 
-    <section class="panel">
-      <h2>搜索清单文件</h2>
-      <label for="fileInput">TXT / JSON / JSONL / CSV 上传</label>
-      <input id="fileInput" type="file" accept=".txt,.md,.json,.jsonl,.ndjson,.csv,.tsv">
-      <label for="pathInput" style="margin-top:12px">或本机/服务器可访问路径</label>
-      <input id="pathInput" placeholder="D:\code\paper_search_agent\search_batch.json">
-      <div class="row">
-        <div><label for="concurrency">同时运行 DOI 子进程</label><select id="concurrency"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
-        <div><label for="timeout">每篇硬超时（秒）</label><select id="timeout"><option value="180" selected>180</option><option value="210">210</option><option value="240">240</option></select></div>
+  <!-- ================= TAB 1: DOI ================= -->
+  <section id="tab-doi" role="tabpanel">
+    <div class="b-card">
+      <div class="strip y"></div>
+      <div class="body">
+        <h2 style="margin:0 0 12px;font-size:17px;text-transform:uppercase">DOI / DOI URL 批量下载</h2>
+        <div class="row two">
+          <div>
+            <label for="doiText">粘贴 DOI（每行一个，支持 https://doi.org/ 链接）</label>
+            <textarea id="doiText" class="b-input" placeholder="10.1021/acs.catal.6c02592&#10;https://doi.org/10.1002/adom.202400123&#10;10.1007/s11244-024-01234-5"></textarea>
+          </div>
+          <div>
+            <div class="field">
+              <label for="fileInput">上传清单（TXT / JSON / JSONL / CSV）</label>
+              <input id="fileInput" class="b-input" type="file" accept=".txt,.md,.json,.jsonl,.ndjson,.csv,.tsv">
+            </div>
+            <div class="field">
+              <label for="pathInput">或服务器可访问的本地清单路径</label>
+              <input id="pathInput" class="b-input" placeholder="D:\code\paper_search_agent\search_batch.json">
+            </div>
+            <div class="hint"><b>归档目录：</b>downloads/&lt;DOI&gt;_&lt;年份&gt;_&lt;期刊&gt;/<b>pdf</b> 与 <b>si</b> 两个子文件夹。已下载且校验通过的条目会自动跳过。</div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="actions">
+          <button id="startText" class="b-btn primary">🚀 开始批量下载</button>
+          <button id="startFile" class="b-btn">上传清单并开始</button>
+          <button id="startPath" class="b-btn">读取路径并开始</button>
+          <button id="cancelJob" class="b-btn danger" disabled>■ 取消当前 Job</button>
+          <button id="clearText" class="b-btn secondary">清空</button>
+        </div>
       </div>
-      <div class="actions"><button id="startFile">上传并开始</button><button id="startPath" class="secondary">读取路径并开始</button><button id="cancelJob" class="danger" disabled>取消当前 Job</button></div>
-      <div class="callout" id="timeoutHelp" aria-live="polite"></div>
-    </section>
-  </div>
-
-  <div class="stats">
-    <div class="stat"><span>任务总数</span><b id="sTotal">0</b></div>
-    <div class="stat"><span>已完成</span><b id="sDone">0</b></div>
-    <div class="stat"><span>运行中</span><b id="sRunning">0</b></div>
-    <div class="stat"><span>当前 Job</span><b id="sJob" style="font-size:14px">—</b></div>
-  </div>
-
-  <section class="panel" style="margin-bottom:18px">
-    <h2>支持的出版社</h2>
-    <div class="supported"><span class="chip">ACS</span><span class="chip">AIP</span><span class="chip">AAAS / Science</span><span class="chip">RSC</span><span class="chip">Wiley</span><span class="chip">SpringerLink</span><span class="chip">Elsevier API / 浏览器降级</span></div>
-    <p class="hint">正文和 SI 都通过校验时会直接跳过。SI 缺失或损坏时，只补下缺失文件，不重复下载正文。</p>
-    <div id="message" aria-live="polite"></div>
+    </div>
   </section>
 
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>DOI</th><th>状态</th><th>出版社</th><th>期刊</th><th>正文</th><th>SI</th><th>耗时</th><th>阶段 / 信息</th></tr></thead>
-      <tbody id="results"></tbody>
-    </table>
+  <!-- ================= TAB 2: OpenAlex ================= -->
+  <section id="tab-search" role="tabpanel" hidden>
+    <div class="b-card">
+      <div class="strip b"></div>
+      <div class="body">
+        <h2 style="margin:0 0 4px;font-size:17px;text-transform:uppercase">学术标题检索 · OpenAlex</h2>
+        <p class="hint" style="margin-top:0">输入文章标题或关键词检索 OpenAlex（免费开源学术数据库），提取 DOI。每条结果旁提供：<b>复制 DOI</b> / <b>下载原文</b> / <b>下载原文+SI</b>。</p>
+        <div class="row" style="grid-template-columns:1fr auto auto auto;align-items:end">
+          <div>
+            <label for="searchQuery">标题 / 关键词</label>
+            <input id="searchQuery" class="b-input" placeholder="photocatalytic nitrate reduction to ammonia">
+          </div>
+          <div>
+            <label for="searchLimit">数量</label>
+            <select id="searchLimit" class="b-select">
+              <option>5</option><option selected>10</option><option>20</option><option>30</option>
+            </select>
+          </div>
+          <div style="padding-bottom:2px"><button id="doSearch" class="b-btn primary">🔍 检索</button></div>
+          <div style="padding-bottom:2px"><button id="useAsBatch" class="b-btn secondary">转入批量解析</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="searchResults"></div>
+
+    <div class="b-card">
+      <div class="strip p"></div>
+      <div class="body">
+        <h2 style="margin:0 0 4px;font-size:17px;text-transform:uppercase">高通量批量标题解析</h2>
+        <p class="hint" style="margin-top:0">一行一个标题（最多 500 条），自动在 OpenAlex 上解析出最匹配的 DOI，再勾选下载。</p>
+        <label for="batchTitles">标题清单</label>
+        <textarea id="batchTitles" class="b-input" placeholder="One article title per line...&#10;每行一个文章标题"></textarea>
+        <div class="actions" style="margin-top:12px">
+          <button id="doBatchResolve" class="b-btn primary">⚙️ 批量解析 DOI</button>
+          <button id="batchDownloadSi" class="b-btn" disabled>⬇ 下载选中（原文+SI）</button>
+          <button id="batchDownloadPdf" class="b-btn" disabled>⬇ 下载选中（仅原文）</button>
+          <button id="batchCopy" class="b-btn secondary" disabled>📋 复制选中 DOI</button>
+          <span id="batchStats" class="b-badge w">未解析</span>
+        </div>
+        <div class="divider"></div>
+        <div id="batchResults"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= TAB 3: CNKI ================= -->
+  <section id="tab-cnki" role="tabpanel" hidden>
+    <div class="b-card">
+      <div class="strip r"></div>
+      <div class="body">
+        <h2 style="margin:0 0 4px;font-size:17px;text-transform:uppercase">知网检索 · CNKI</h2>
+        <p class="hint" style="margin-top:0">通过校园网权限在知网页面检索中文文献，提取 <b>DOI 与中文标题</b>。知网文章不含 SI，仅提供：<b>复制 DOI</b> / <b>下载原文</b>。</p>
+        <div class="row" style="grid-template-columns:1fr auto auto;align-items:end">
+          <div>
+            <label for="cnkiQuery">中文标题 / 关键词</label>
+            <input id="cnkiQuery" class="b-input" placeholder="锂离子电池 界面改性">
+          </div>
+          <div>
+            <label for="cnkiTimeout">超时（秒）</label>
+            <select id="cnkiTimeout" class="b-select">
+              <option>60</option><option selected>120</option><option>180</option>
+            </select>
+          </div>
+          <div style="padding-bottom:2px"><button id="doCnkiSearch" class="b-btn primary">🔍 检索知网</button></div>
+        </div>
+        <div class="hint" style="margin-top:10px">⚠ 检索会启动一个独立的 Edge 子进程访问知网；请确保已连接校园网并拥有知网访问权限。</div>
+      </div>
+    </div>
+    <div id="cnkiResults"></div>
+  </section>
+
+  <!-- ================= TAB 4: JOBS ================= -->
+  <section id="tab-jobs" role="tabpanel" hidden>
+    <div class="stats">
+      <div class="stat"><span>任务总数</span><b id="sTotal">0</b></div>
+      <div class="stat"><span>已完成</span><b id="sDone">0</b></div>
+      <div class="stat"><span>运行中</span><b id="sRunning">0</b></div>
+      <div class="stat"><span>当前 Job</span><b id="sJob" style="font-size:14px">—</b></div>
+    </div>
+
+    <div class="b-card">
+      <div class="strip g"></div>
+      <div class="body">
+        <div class="actions" style="justify-content:space-between">
+          <h2 style="margin:0;font-size:16px;text-transform:uppercase">下载结果</h2>
+          <div class="row" style="grid-template-columns:auto auto;gap:8px;align-items:end">
+            <div><label for="concurrency">并发</label>
+              <select id="concurrency" class="b-select"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
+            <div><label for="timeout">硬超时(秒)</label>
+              <select id="timeout" class="b-select"><option value="180" selected>180</option><option value="210">210</option><option value="240">240</option></select></div>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:8px">状态含义：<span class="b-badge g">success</span> 全部完成 ·
+          <span class="b-badge y">partial</span> 部分完成 · <span class="b-badge b">skipped</span> 已存在跳过 ·
+          <span class="b-badge r">failed</span> 失败（查看 downloads/_logs 日志）</div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>DOI</th><th>状态</th><th>来源</th><th>期刊</th><th>年份</th><th>正文</th><th>SI</th><th>耗时</th><th>信息</th></tr></thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div id="toast" aria-live="polite"></div>
+
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" role="dialog" aria-modal="true">
+      <span class="b-badge y">CONFIRM</span>
+      <h3 id="modalTitle">确认下载</h3>
+      <p id="modalBody">…</p>
+      <div class="actions" style="justify-content:flex-end">
+        <button id="modalCancel" class="b-btn secondary">取消</button>
+        <button id="modalOk" class="b-btn primary">确定</button>
+      </div>
+    </div>
   </div>
 </main>
+
 <script>
-const $=s=>document.querySelector(s);let pollTimer=null,currentJob=null;
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
+let pollTimer=null,currentJob=null;
+
+/* ---------- primitives ---------- */
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function setMessage(t){$('#message').textContent=t} function params(){return{max_concurrency:Number($('#concurrency').value),article_timeout_seconds:Number($('#timeout').value)}}
-const timeoutMessages={180:'常规文章最多等待 180 秒。文件较大或网络较慢时，可改为 210 或 240 秒；Wiley 会自动使用 600 秒预算。',210:'常规文章最多等待 210 秒，适合正文或补充材料较大的任务；Wiley 会自动使用 600 秒预算。',240:'常规文章最多等待 240 秒。等待更久，但能减少慢速下载被提前终止；Wiley 会自动使用 600 秒预算。'};
-function updateTimeoutHelp(){const box=$('#timeoutHelp'),value=$('#timeout').value;box.textContent=timeoutMessages[value];box.classList.remove('changed');requestAnimationFrame(()=>box.classList.add('changed'));setTimeout(()=>box.classList.remove('changed'),260)}
+function toast(t,err){const box=$('#toast'),el=document.createElement('div');el.className='toast-item'+(err?' err':'');el.textContent=t;box.appendChild(el);setTimeout(()=>el.remove(),err?5200:3200)}
 async function jsonFetch(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.detail||r.statusText);return d}
-async function submitText(){const text=$('#doiText').value.trim();if(!text){setMessage('请先粘贴 DOI。');return}try{const d=await jsonFetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doi_text:text,...params()})});beginPolling(d.job_id)}catch(e){setMessage(e.message)}}
-async function submitFile(){const f=$('#fileInput').files[0];if(!f){setMessage('请选择文件。');return}const p=params(),form=new FormData();form.append('file',f);const qs=new URLSearchParams({max_concurrency:p.max_concurrency,article_timeout_seconds:p.article_timeout_seconds,doi_field:'doi'});try{beginPolling((await jsonFetch('/api/jobs/upload?'+qs,{method:'POST',body:form})).job_id)}catch(e){setMessage(e.message)}}
-async function submitPath(){const input_path=$('#pathInput').value.trim();if(!input_path){setMessage('请输入清单路径。');return}try{beginPolling((await jsonFetch('/api/jobs/path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input_path,doi_field:'doi',...params()})})).job_id)}catch(e){setMessage(e.message)}}
-async function cancelCurrent(){if(!currentJob)return;try{await jsonFetch('/api/jobs/'+currentJob+'/cancel',{method:'POST'});setMessage('已请求取消；活动 DOI 子进程及其 Edge 将被终止。');await refresh()}catch(e){setMessage(e.message)}}
-function beginPolling(id){currentJob=id;$('#sJob').textContent=id;$('#cancelJob').disabled=false;setMessage('任务已启动。');if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,2500)}
-async function refresh(){if(!currentJob)return;try{const j=await jsonFetch('/api/jobs/'+currentJob);$('#sTotal').textContent=j.total;$('#sDone').textContent=j.completed;$('#sRunning').textContent=j.running;render(j.results||[]);setMessage(`Job ${j.id}: ${j.status} · ${j.completed}/${j.total}`+(j.error?` · ${j.error}`:''));if(['completed','failed','cancelled'].includes(j.status)){clearInterval(pollTimer);pollTimer=null;$('#cancelJob').disabled=true}}catch(e){setMessage('读取状态失败：'+e.message)}}
-function render(items){$('#results').innerHTML=items.map(x=>{const paper=x.paper?.valid?'✓':(x.paper?'✗':'—'),si=`${x.si_successful??0}/${x.si_detected??0}`,stage=x.diagnostics?.last_event?.stage||'';return `<tr><td><code>${esc(x.doi)}</code></td><td class="status ${esc(x.status)}">${esc(x.status)}</td><td>${esc(x.publisher||'—')}</td><td>${esc(x.journal||'—')}</td><td>${paper}</td><td>${si}</td><td>${x.elapsed_seconds==null?'—':esc(x.elapsed_seconds)+' s'}</td><td>${stage?'<code>'+esc(stage)+'</code> · ':''}${esc(x.message||'')}</td></tr>`}).join('')}
-$('#startText').addEventListener('click',submitText);$('#startFile').addEventListener('click',submitFile);$('#startPath').addEventListener('click',submitPath);$('#cancelJob').addEventListener('click',cancelCurrent);$('#clearText').addEventListener('click',()=>{$('#doiText').value='';$('#doiText').focus();setMessage('已清空。')});$('#timeout').addEventListener('change',updateTimeoutHelp);updateTimeoutHelp();
+async function copyText(t){try{await navigator.clipboard.writeText(t);toast('已复制：'+t.slice(0,60)+(t.length>60?'…':''))}catch{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('已复制')}}
+function confirmModal(title,body){return new Promise(res=>{$('#modalTitle').textContent=title;$('#modalBody').textContent=body;$('#modalOverlay').classList.add('open');
+  const done=v=>{$('#modalOverlay').classList.remove('open');$('#modalOk').onclick=$('#modalCancel').onclick=null;res(v)};
+  $('#modalOk').onclick=()=>done(true);$('#modalCancel').onclick=()=>done(false)})}
+function params(){return{max_concurrency:Number($('#concurrency').value),article_timeout_seconds:Number($('#timeout').value)}}
+
+/* ---------- tabs ---------- */
+$$('nav.tabs .b-btn').forEach(btn=>btn.addEventListener('click',()=>{
+  $$('nav.tabs .b-btn').forEach(b=>b.setAttribute('aria-selected',b===btn));
+  ['tab-doi','tab-search','tab-cnki','tab-jobs'].forEach(id=>$('#'+id).hidden=(id!==btn.dataset.tab));
+}));
+
+/* ---------- DOI tab ---------- */
+async function submitText(){
+  const text=$('#doiText').value.trim();
+  if(!text){toast('请先粘贴 DOI。',true);return}
+  try{const d=await jsonFetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({doi_text:text,...params()})});beginPolling(d.job_id)}
+  catch(e){toast(e.message,true)}
+}
+async function submitFile(){
+  const f=$('#fileInput').files[0];
+  if(!f){toast('请选择清单文件。',true);return}
+  const p=params(),form=new FormData();form.append('file',f);
+  const qs=new URLSearchParams({max_concurrency:p.max_concurrency,article_timeout_seconds:p.article_timeout_seconds,doi_field:'doi'});
+  try{beginPolling((await jsonFetch('/api/jobs/upload?'+qs,{method:'POST',body:form})).job_id)}
+  catch(e){toast(e.message,true)}
+}
+async function submitPath(){
+  const input_path=$('#pathInput').value.trim();
+  if(!input_path){toast('请输入清单路径。',true);return}
+  try{beginPolling((await jsonFetch('/api/jobs/path',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({input_path,doi_field:'doi',...params()})})).job_id)}
+  catch(e){toast(e.message,true)}
+}
+async function cancelCurrent(){if(!currentJob)return;
+  try{await jsonFetch('/api/jobs/'+currentJob+'/cancel',{method:'POST'});toast('已请求取消，活动子进程及 Edge 将被终止。')}
+  catch(e){toast(e.message,true)}}
+
+/* ---------- job polling ---------- */
+function beginPolling(id){currentJob=id;$('#sJob').textContent=id;$('#cancelJob').disabled=false;
+  switchTab('tab-jobs');toast('任务已启动 · Job '+id);
+  if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,2500)}
+function switchTab(id){$$('nav.tabs .b-btn').forEach(b=>{const on=b.dataset.tab===id;b.setAttribute('aria-selected',on);$('#'+b.dataset.tab).hidden=!on})}
+async function refresh(){if(!currentJob)return;
+  try{const j=await jsonFetch('/api/jobs/'+currentJob);
+    $('#sTotal').textContent=j.total;$('#sDone').textContent=j.completed;$('#sRunning').textContent=j.running;
+    render(j.results||[]);
+    if(['completed','failed','cancelled'].includes(j.status)){clearInterval(pollTimer);pollTimer=null;$('#cancelJob').disabled=true;
+      toast('Job '+j.id+' 结束：'+j.status)}}
+  catch(e){toast('读取状态失败：'+e.message,true)}}
+function render(items){$('#results').innerHTML=items.map(x=>{
+  const paper=x.paper?.valid?'✓':(x.paper?'✗':'—'),si=`${x.si_successful??0}/${x.si_detected??0}`;
+  return `<tr><td><code>${esc(x.doi)}</code></td><td class="status ${esc(x.status)}">${esc(x.status)}</td>
+  <td>${esc(x.publisher||'—')}</td><td>${esc(x.journal||'—')}</td><td>${esc(x.year||'—')}</td>
+  <td>${paper}</td><td>${si}</td><td>${x.elapsed_seconds==null?'—':esc(x.elapsed_seconds)+'s'}</td>
+  <td>${esc(x.message||'')}</td></tr>`}).join('')}
+
+/* ---------- OpenAlex search ---------- */
+function hitCard(row,siBtn=true){
+  const doi=row.doi||'';
+  return `<div class="hit" data-doi="${esc(doi)}" data-url="" data-title="${esc(row.title||'')}">
+    <h3>${esc(row.title||'(无标题)')}</h3>
+    <div class="doi-code">${doi?esc(doi):'<i>无 DOI</i>'}</div>
+    <div class="meta">
+      <span class="b-badge b">${esc(row.year||'年份?')}</span>
+      ${row.journal?`<span class="b-badge w">${esc(row.journal)}</span>`:''}
+      <span class="b-badge y">被引 ${esc(row.cited_by_count??0)}</span>
+      ${row.open_access?'<span class="b-badge g">OA</span>':''}
+      ${row.similarity!=null?`<span class="b-badge ${row.resolved?'g':'r'}">相似度 ${esc(row.similarity)}</span>`:''}
+      ${row.authors&&row.authors.length?`<span>${esc(row.authors.slice(0,4).join(', '))}</span>`:''}
+    </div>
+    <div class="btns">
+      <button class="b-btn small secondary" onclick='copyText(${JSON.stringify(doi)})'>📋 复制 DOI</button>
+      <button class="b-btn small primary" ${doi?'':'disabled'} onclick='downloadRow(this,false)'>⬇ 下载原文</button>
+      ${siBtn?`<button class="b-btn small" ${doi?'':'disabled'} onclick='downloadRow(this,true)'>🧪 下载原文+SI</button>`:'<span class="b-badge p">知网无 SI</span>'}
+    </div></div>`}
+async function doSearch(){
+  const q=$('#searchQuery').value.trim();
+  if(!q){toast('请输入检索内容。',true);return}
+  $('#doSearch').disabled=true;$('#searchResults').innerHTML='<p class="hint">检索中…</p>';
+  try{const d=await jsonFetch(`/api/search/academic?q=${encodeURIComponent(q)}&limit=${$('#searchLimit').value}`);
+    $('#searchResults').innerHTML=d.rows.length
+      ? d.rows.map(r=>hitCard(r)).join('') : '<p class="hint">OpenAlex 没有返回结果。</p>'}
+  catch(e){$('#searchResults').innerHTML='';toast('检索失败：'+e.message,true)}
+  finally{$('#doSearch').disabled=false}}
+function rowFromCard(card,si){
+  return {doi:card.dataset.doi,title_query:card.dataset.title||null,article_url:card.dataset.url||null,download_si:si}}
+async function downloadRow(btn,si){
+  const card=btn.closest('.hit');
+  await downloadItems([rowFromCard(card,si)],si)}
+async function downloadItems(items,si){
+  const ok=await confirmModal(si?'下载原文 + SI':'仅下载原文',
+    `将提交 ${items.length} 个下载任务（${si?'含补充材料 SI':'不含 SI'}），通过校园网在独立浏览器子进程中完成。`);
+  if(!ok)return;
+  try{const d=await jsonFetch('/api/jobs/items',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items,...params()})});beginPolling(d.job_id)}
+  catch(e){toast(e.message,true)}}
+
+/* ---------- batch title resolution ---------- */
+let batchRows=[];
+async function doBatchResolve(){
+  const titles=$('#batchTitles').value.split('\n').map(x=>x.trim()).filter(Boolean);
+  if(!titles.length){toast('请先粘贴标题清单（每行一个）。',true);return}
+  const ok=await confirmModal('批量解析',`将对 ${titles.length} 个标题逐条请求 OpenAlex 解析 DOI（约 ${Math.ceil(titles.length*0.2)} 秒）。`);
+  if(!ok)return;
+  $('#doBatchResolve').disabled=true;$('#batchStats').textContent='解析中…';
+  try{const d=await jsonFetch('/api/search/academic/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({titles})});
+    batchRows=d.rows;
+    $('#batchResults').innerHTML=d.rows.map(r=>hitCard(r)).join('');
+    $('#batchStats').textContent=`解析 ${d.resolved}/${d.requested}`;
+    const has=d.rows.some(r=>r.doi);
+    $('#batchDownloadSi').disabled=!has;$('#batchDownloadPdf').disabled=!has;$('#batchCopy').disabled=!has;
+    toast(`批量解析完成：${d.resolved}/${d.requested} 条匹配到 DOI`)}
+  catch(e){$('#batchStats').textContent='失败';toast('批量解析失败：'+e.message,true)}
+  finally{$('#doBatchResolve').disabled=false}}
+async function batchDownload(si){
+  const items=batchRows.filter(r=>r.doi).map(r=>({doi:r.doi,title_query:r.query,article_url:null,download_si:si}));
+  if(!items.length){toast('没有已解析出 DOI 的条目。',true);return}
+  await downloadItems(items,si)}
+async function batchCopyDoi(){
+  const dois=batchRows.filter(r=>r.doi).map(r=>r.doi);
+  if(!dois.length){toast('没有已解析出 DOI 的条目。',true);return}
+  await copyText(dois.join('\n'))}
+
+/* ---------- CNKI search ---------- */
+async function doCnkiSearch(){
+  const q=$('#cnkiQuery').value.trim();
+  if(!q){toast('请输入中文标题或关键词。',true);return}
+  const ok=await confirmModal('知网检索','将启动独立 Edge 子进程访问知网（需校园网权限），约需 30–120 秒。');
+  if(!ok)return;
+  $('#doCnkiSearch').disabled=true;$('#cnkiResults').innerHTML='<p class="hint">知网检索中，浏览器子进程运行里…</p>';
+  try{const d=await jsonFetch(`/api/search/cnki?q=${encodeURIComponent(q)}&timeout=${$('#cnkiTimeout').value}`);
+    $('#cnkiResults').innerHTML=d.rows.length
+      ? d.rows.map(r=>hitCard({...r,journal:r.snippet?undefined:null,authors:[r.snippet||''],cited_by_count:null,open_access:false})).join('')
+      : '<p class="hint">知网没有返回可识别的结果（可能需要验证或登录）。</p>'}
+  catch(e){$('#cnkiResults').innerHTML='';toast('知网检索失败：'+e.message,true)}
+  finally{$('#doCnkiSearch').disabled=false}}
+
+/* ---------- wire up ---------- */
+$('#startText').addEventListener('click',submitText);
+$('#startFile').addEventListener('click',submitFile);
+$('#startPath').addEventListener('click',submitPath);
+$('#cancelJob').addEventListener('click',cancelCurrent);
+$('#clearText').addEventListener('click',()=>{$('#doiText').value='';$('#doiText').focus();toast('已清空。')});
+$('#doSearch').addEventListener('click',doSearch);
+$('#searchQuery').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
+$('#useAsBatch').addEventListener('click',()=>{
+  const q=$('#searchQuery').value.trim();
+  if(!q){toast('请先输入检索内容。',true);return}
+  $('#batchTitles').value=q;switchTab('tab-search');toast('已转入批量解析输入框。')});
+$('#doBatchResolve').addEventListener('click',doBatchResolve);
+$('#batchDownloadSi').addEventListener('click',()=>batchDownload(true));
+$('#batchDownloadPdf').addEventListener('click',()=>batchDownload(false));
+$('#batchCopy').addEventListener('click',batchCopyDoi);
+$('#doCnkiSearch').addEventListener('click',doCnkiSearch);
 </script>
 </body>
 </html>

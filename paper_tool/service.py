@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import signal
 import sys
 import time
 import uuid
@@ -17,6 +16,7 @@ from .config import Settings
 from .models import ArticleResult, FileResult, ItemStatus
 from .registry import get_adapter
 from .storage import (
+    doi_to_filename,
     find_existing_paper,
     load_article_manifest,
     manifest_has_complete_si,
@@ -159,7 +159,7 @@ class DownloadService:
         self._publisher_locks: dict[str, asyncio.Lock] = {}
 
     def _persist_result(self, result: ArticleResult) -> None:
-        safe = result.doi.replace("/", "_")
+        safe = doi_to_filename(result.doi)
         write_json_atomic(self.manifest_dir / f"{safe}.json", result.to_dict())
 
     async def _run_subprocess(
@@ -167,11 +167,14 @@ class DownloadService:
         doi: str,
         slot: int,
         callback: ProgressCallback | None,
+        *,
+        download_si: bool = True,
+        hint: dict | None = None,
     ) -> ArticleResult:
         start = time.monotonic()
         start_iso = _now()
         run_id = uuid.uuid4().hex[:10]
-        safe = doi.replace("/", "_")
+        safe = doi_to_filename(doi)
         work_dir = self.run_dir / f"{safe}_{run_id}"
         work_dir.mkdir(parents=True, exist_ok=True)
         request_path = work_dir / "request.json"
@@ -186,6 +189,8 @@ class DownloadService:
             "resume_si": existing_paper is not None,
             "existing_paper": str(existing_paper) if existing_paper else None,
             "previous_manifest": previous_manifest,
+            "download_si": download_si,
+            "article_hint": hint or {},
         }
         write_json_atomic(request_path, request_payload)
 
@@ -416,6 +421,8 @@ class DownloadService:
         dois: list[str],
         *,
         callback: ProgressCallback | None = None,
+        download_si: bool = True,
+        article_hints: dict[str, dict] | None = None,
     ) -> list[ArticleResult]:
         # Preserve submitted order and remove duplicates inside the request itself.
         ordered: list[str] = []
@@ -469,7 +476,13 @@ class DownloadService:
                     slot_counter += 1
                     slot = ((slot_counter - 1) % self.settings.max_concurrency) + 1
 
-                item = await self._run_subprocess(doi, slot, callback)
+                item = await self._run_subprocess(
+                    doi,
+                    slot,
+                    callback,
+                    download_si=download_si,
+                    hint=(article_hints or {}).get(doi),
+                )
                 result_by_doi[doi] = item
                 await _emit(callback, item)
 

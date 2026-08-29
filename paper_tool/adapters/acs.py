@@ -44,13 +44,15 @@ class ACSAdapter(PublisherAdapter):
         suffix = ctx.doi.split("/", 1)[-1]
         fallback = ACS_FALLBACK.get(suffix.split(".", 1)[0], "Unknown Journal")
         journal = await self.journal_from_meta(tab, fallback)
-        _, paper_dir, si_dir = self.dirs(ctx, journal)
+        year = await self.year_from_meta(tab)
+        _, paper_dir, si_dir = self.dirs(ctx, journal, year)
         title = await tab.title
 
         result = ArticleResult(
             doi=ctx.doi,
             publisher=self.publisher_name,
             journal=journal,
+            year=year,
             article_url=article_url,
             title=title,
         )
@@ -78,24 +80,27 @@ class ACSAdapter(PublisherAdapter):
                         "paper", path, pdf_url, "fetch_blob", extension=".pdf"
                     )
 
-        typed_links = await self.collect_links(tab, 'a[data-doctype="dataSupplementDoc"]')
-        route_links = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
-        si_links = merge_si_links(typed_links, route_links)
-        result.diagnostics["acs_si_candidates"] = len(si_links)
+        if ctx.want_si:
+            typed_links = await self.collect_links(tab, 'a[data-doctype="dataSupplementDoc"]')
+            route_links = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
+            si_links = merge_si_links(typed_links, route_links)
+            result.diagnostics["acs_si_candidates"] = len(si_links)
 
-        for item in si_links:
-            ext = infer_extension(item["url"], item["text"])
-            target = self.si_target(si_dir, ctx.doi, item["url"], ext)
-            existing = self.existing_file_result(ctx, "si", target, item["url"], ext)
-            if existing:
-                result.si.append(existing)
-                continue
-            path = await blob_download(
-                tab, ctx.worker.staging_dir, item["url"], target,
-                min(ctx.settings.blob_download_timeout_seconds, 75),
-                link_text=item["text"],
-            )
-            result.si.append(self.file_result("si", path, item["url"], "fetch_blob", extension=ext))
+            for item in si_links:
+                ext = infer_extension(item["url"], item["text"])
+                target = self.si_target(si_dir, ctx.doi, item["url"], ext)
+                existing = self.existing_file_result(ctx, "si", target, item["url"], ext)
+                if existing:
+                    result.si.append(existing)
+                    continue
+                path = await blob_download(
+                    tab, ctx.worker.staging_dir, item["url"], target,
+                    min(ctx.settings.blob_download_timeout_seconds, 75),
+                    link_text=item["text"],
+                )
+                result.si.append(self.file_result("si", path, item["url"], "fetch_blob", extension=ext))
+        else:
+            result.diagnostics["acs_si_candidates"] = 0
 
         result.diagnostics["si_scan_complete"] = True
         return result

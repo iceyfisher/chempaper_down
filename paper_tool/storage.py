@@ -29,9 +29,11 @@ def sha256_file(path: Path) -> str:
 
 def valid_pdf(path: Path) -> bool:
     try:
-        if not path.is_file() or path.stat().st_size <= 0:
+        if not path.is_file():
             return False
         size = path.stat().st_size
+        if size <= 0:
+            return False
         with path.open("rb") as fh:
             head = fh.read(64)
             fh.seek(max(0, size - 4096))
@@ -46,15 +48,20 @@ def valid_pdf(path: Path) -> bool:
 
 
 def validate_file(path: Path, extension: str | None = None) -> tuple[bool, str]:
-    if not path.is_file() or path.stat().st_size <= 0:
+    try:
+        if not path.is_file():
+            return False, "missing_or_empty"
+        size = path.stat().st_size
+        if size <= 0:
+            return False, "missing_or_empty"
+        with path.open("rb") as fh:
+            head = fh.read(512)
+            fh.seek(max(0, size - 4096))
+            tail = fh.read()
+    except OSError:
         return False, "missing_or_empty"
 
     ext = (extension or path.suffix).lower()
-    size = path.stat().st_size
-    with path.open("rb") as fh:
-        head = fh.read(512)
-        fh.seek(max(0, size - 4096))
-        tail = fh.read()
 
     from .resources import obvious_error_payload
 
@@ -62,7 +69,12 @@ def validate_file(path: Path, extension: str | None = None) -> tuple[bool, str]:
     if error:
         return False, error
     if ext == ".pdf":
-        return (valid_pdf(path), "ok" if valid_pdf(path) else "invalid_pdf")
+        valid = (
+            head.startswith(b"%PDF")
+            and b"%%EOF" in tail
+            and b"\xef\xbf\xbd" not in head
+        )
+        return valid, "ok" if valid else "invalid_pdf"
     if ext == ".png" and not head.startswith(b"\x89PNG\r\n\x1a\n"):
         return False, "invalid_png"
     if ext in {".jpg", ".jpeg"} and not head.startswith(b"\xff\xd8\xff"):
@@ -79,7 +91,7 @@ def validate_file(path: Path, extension: str | None = None) -> tuple[bool, str]:
 
 
 def article_manifest_path(download_root: Path, doi: str) -> Path:
-    return download_root / "_manifests" / f"{doi.replace('/', '_')}.json"
+    return download_root / "_manifests" / f"{doi_to_filename(doi)}.json"
 
 
 def load_article_manifest(download_root: Path, doi: str) -> dict[str, Any] | None:
@@ -111,27 +123,40 @@ def manifest_has_complete_si(manifest: dict[str, Any] | None) -> bool:
 def find_existing_paper(download_root: Path, doi: str) -> Path | None:
     """Hard DOI duplicate check.
 
-    Only a valid main PDF under **/paper/<doi>.pdf counts as a duplicate.  SI-only
-    partial runs are not considered complete and are allowed to resume.
+    Only a valid main PDF under **/pdf/<doi>.pdf (or the legacy **/paper/<doi>.pdf
+    layout) counts as a duplicate.  SI-only partial runs are not considered
+    complete and are allowed to resume.
     """
 
     expected_name = f"{doi_to_filename(doi)}.pdf"
     if not download_root.exists():
         return None
-    for paper_dir in download_root.rglob("paper"):
-        candidate = paper_dir / expected_name
-        if valid_pdf(candidate):
+    for candidate in download_root.rglob(expected_name):
+        if candidate.parent.name in {"pdf", "paper"} and valid_pdf(candidate):
             return candidate
     return None
 
 
-def make_article_dirs(download_root: Path, publisher: str, journal: str) -> tuple[Path, Path, Path]:
-    base = download_root / clean_path_component(f"{publisher} - {journal}")
-    paper_dir = base / "paper"
+def article_dir_name(doi: str, year: str | int | None, journal: str | None) -> str:
+    year_part = clean_path_component(str(year)) if year not in (None, "") else "unknown"
+    journal_part = clean_path_component(journal) if journal else "Unknown Journal"
+    return f"{doi_to_filename(doi)}_{year_part}_{journal_part}"
+
+
+def make_article_dirs(
+    download_root: Path,
+    doi: str,
+    year: str | int | None,
+    journal: str | None,
+) -> tuple[Path, Path, Path]:
+    """downloads/<doi>_<year>_<journal>/ with a pdf/ and a si/ subfolder."""
+
+    base = download_root / article_dir_name(doi, year, journal)
+    pdf_dir = base / "pdf"
     si_dir = base / "si"
-    paper_dir.mkdir(parents=True, exist_ok=True)
+    pdf_dir.mkdir(parents=True, exist_ok=True)
     si_dir.mkdir(parents=True, exist_ok=True)
-    return base, paper_dir, si_dir
+    return base, pdf_dir, si_dir
 
 
 def write_json_atomic(path: Path, payload: Any) -> None:

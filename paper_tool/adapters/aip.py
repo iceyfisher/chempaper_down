@@ -101,11 +101,13 @@ class AIPAdapter(PublisherAdapter):
         article_url = await self.navigate(ctx, cloudflare=True)
         tab = ctx.tab
         journal = await self.journal_from_meta(tab, "The Journal of Chemical Physics")
-        _, paper_dir, si_dir = self.dirs(ctx, journal)
+        year = await self.year_from_meta(tab)
+        _, paper_dir, si_dir = self.dirs(ctx, journal, year)
         result = ArticleResult(
             doi=ctx.doi,
             publisher=self.publisher_name,
             journal=journal,
+            year=year,
             article_url=article_url,
             title=await tab.title,
         )
@@ -145,33 +147,36 @@ class AIPAdapter(PublisherAdapter):
                     "paper", path, pdf_url, method, extension=".pdf"
                 )
 
-        typed = await self.collect_links(
-            tab,
-            'div.dataSuppLink a[data-doctype="dataSupplementDoc"][href], '
-            'a[data-doctype="dataSupplementDoc"][href]',
-        )
-        routed = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
-        si_links = select_aip_si(typed + routed)
-        result.diagnostics["aip_si_candidates"] = len(si_links)
+        if ctx.want_si:
+            typed = await self.collect_links(
+                tab,
+                'div.dataSuppLink a[data-doctype="dataSupplementDoc"][href], '
+                'a[data-doctype="dataSupplementDoc"][href]',
+            )
+            routed = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
+            si_links = select_aip_si(typed + routed)
+            result.diagnostics["aip_si_candidates"] = len(si_links)
 
-        for item in si_links:
-            url = item["url"]
-            extension = infer_aip_extension(url, item["text"])
-            target = self.si_target(si_dir, ctx.doi, url, extension)
-            existing = self.existing_file_result(ctx, "si", target, url, extension)
-            if existing:
-                result.si.append(existing)
-                continue
-            path, method = await _download(
-                ctx,
-                url,
-                target,
-                extension,
-                link_text=item["text"],
-            )
-            result.si.append(
-                self.file_result("si", path, url, method, extension=extension)
-            )
+            for item in si_links:
+                url = item["url"]
+                extension = infer_aip_extension(url, item["text"])
+                target = self.si_target(si_dir, ctx.doi, url, extension)
+                existing = self.existing_file_result(ctx, "si", target, url, extension)
+                if existing:
+                    result.si.append(existing)
+                    continue
+                path, method = await _download(
+                    ctx,
+                    url,
+                    target,
+                    extension,
+                    link_text=item["text"],
+                )
+                result.si.append(
+                    self.file_result("si", path, url, method, extension=extension)
+                )
+        else:
+            result.diagnostics["aip_si_candidates"] = 0
 
         result.diagnostics["si_scan_complete"] = True
         if result.paper is None and not result.message:

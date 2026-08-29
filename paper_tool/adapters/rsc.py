@@ -66,11 +66,13 @@ class RSCAdapter(PublisherAdapter):
                 fallback = RSC_FALLBACK[part]
                 break
         journal = await self.journal_from_meta(tab, fallback)
-        _, paper_dir, si_dir = self.dirs(ctx, journal)
+        year = await self.year_from_meta(tab)
+        _, paper_dir, si_dir = self.dirs(ctx, journal, year)
         result = ArticleResult(
             doi=ctx.doi,
             publisher=self.publisher_name,
             journal=journal,
+            year=year,
             article_url=article_url,
             title=await asyncio.wait_for(tab.title, timeout=3),
         )
@@ -115,26 +117,27 @@ class RSCAdapter(PublisherAdapter):
                 "paper", path, pdf_url, method, extension=".pdf"
             )
 
-        si_links = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
-        for item in si_links:
-            url = item["url"]
-            if urlparse(url).netloc and "rsc.org" not in urlparse(url).netloc:
-                continue
-            ext = infer_extension(url, item["text"])
-            target = self.si_target(si_dir, ctx.doi, url, ext)
-            existing = self.existing_file_result(ctx, "si", target, url, ext)
-            if existing:
-                result.si.append(existing)
-                continue
-            path = await blob_download(
-                tab,
-                ctx.worker.staging_dir,
-                url,
-                target,
-                min(ctx.settings.blob_download_timeout_seconds, 75),
-                link_text=item["text"],
-            )
-            result.si.append(self.file_result("si", path, url, "fetch_blob", extension=ext))
+        if ctx.want_si:
+            si_links = await self.collect_links(tab, 'a[href*="/article-supplement/"]')
+            for item in si_links:
+                url = item["url"]
+                if urlparse(url).netloc and "rsc.org" not in urlparse(url).netloc:
+                    continue
+                ext = infer_extension(url, item["text"])
+                target = self.si_target(si_dir, ctx.doi, url, ext)
+                existing = self.existing_file_result(ctx, "si", target, url, ext)
+                if existing:
+                    result.si.append(existing)
+                    continue
+                path = await blob_download(
+                    tab,
+                    ctx.worker.staging_dir,
+                    url,
+                    target,
+                    min(ctx.settings.blob_download_timeout_seconds, 75),
+                    link_text=item["text"],
+                )
+                result.si.append(self.file_result("si", path, url, "fetch_blob", extension=ext))
 
         result.diagnostics["si_scan_complete"] = True
         return result

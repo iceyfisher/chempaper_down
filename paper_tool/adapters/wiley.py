@@ -220,11 +220,13 @@ class WileyAdapter(PublisherAdapter):
                 diagnostics={"access_issue": "publisher_challenge"},
             )
         journal = await self.journal_from_meta(tab, fallback)
-        _, paper_dir, si_dir = self.dirs(ctx, journal)
+        year = await self.year_from_meta(tab)
+        _, paper_dir, si_dir = self.dirs(ctx, journal, year)
         result = ArticleResult(
             doi=ctx.doi,
             publisher=self.publisher_name,
             journal=journal,
+            year=year,
             article_url=article_url,
             title=await tab.title,
         )
@@ -319,44 +321,48 @@ class WileyAdapter(PublisherAdapter):
                 extension=".pdf",
             )
 
-        await tab.query(
-            'table.support-info__table, a[href*="action/downloadSupplement"], a[href*="-sup-"]',
-            timeout=30,
-            raise_exc=False,
-        )
-        raw = await tab.execute_script(WILEY_SI_DISCOVERY_JS, return_by_value=True)
-        records = (_unwrap(raw) or {}).get("records", [])
-        si_links = select_wiley_si(records)
-        result.diagnostics["wiley_raw_si_candidates"] = len(records)
-        result.diagnostics["wiley_selected_si"] = len(si_links)
-        for item in si_links:
-            ext = infer_extension(item["url"], item["text"])
-            target = self.si_target(si_dir, ctx.doi, item["url"], ext)
-            existing = self.existing_file_result(ctx, "si", target, item["url"], ext)
-            if existing:
-                result.si.append(existing)
-                continue
-            # Keep the article page stable. If a large in-page fetch exceeds
-            # Pydoll's 60-second CDP command limit, let Chromium's native download
-            # manager finish it in a temporary tab instead.
-            path, method = await download_wiley_attachment(
-                tab,
-                ctx.worker,
-                item["url"],
-                target,
-                min(ctx.settings.wiley_article_timeout_seconds, 300),
-                link_text=item["text"],
-                extension=ext,
+        if ctx.want_si:
+            await tab.query(
+                'table.support-info__table, a[href*="action/downloadSupplement"], a[href*="-sup-"]',
+                timeout=30,
+                raise_exc=False,
             )
-            if method != "fetch_blob":
-                result.diagnostics["wiley_native_fallback_attempted"] = (
-                    result.diagnostics.get("wiley_native_fallback_attempted", 0) + 1
+            raw = await tab.execute_script(WILEY_SI_DISCOVERY_JS, return_by_value=True)
+            records = (_unwrap(raw) or {}).get("records", [])
+            si_links = select_wiley_si(records)
+            result.diagnostics["wiley_raw_si_candidates"] = len(records)
+            result.diagnostics["wiley_selected_si"] = len(si_links)
+            for item in si_links:
+                ext = infer_extension(item["url"], item["text"])
+                target = self.si_target(si_dir, ctx.doi, item["url"], ext)
+                existing = self.existing_file_result(ctx, "si", target, item["url"], ext)
+                if existing:
+                    result.si.append(existing)
+                    continue
+                # Keep the article page stable. If a large in-page fetch exceeds
+                # Pydoll's 60-second CDP command limit, let Chromium's native download
+                # manager finish it in a temporary tab instead.
+                path, method = await download_wiley_attachment(
+                    tab,
+                    ctx.worker,
+                    item["url"],
+                    target,
+                    min(ctx.settings.wiley_article_timeout_seconds, 300),
+                    link_text=item["text"],
+                    extension=ext,
                 )
-                if path is not None:
-                    result.diagnostics["wiley_native_fallback_successful"] = (
-                        result.diagnostics.get("wiley_native_fallback_successful", 0) + 1
+                if method != "fetch_blob":
+                    result.diagnostics["wiley_native_fallback_attempted"] = (
+                        result.diagnostics.get("wiley_native_fallback_attempted", 0) + 1
                     )
-            result.si.append(self.file_result("si", path, item["url"], method, extension=ext))
+                    if path is not None:
+                        result.diagnostics["wiley_native_fallback_successful"] = (
+                            result.diagnostics.get("wiley_native_fallback_successful", 0) + 1
+                        )
+                result.si.append(self.file_result("si", path, item["url"], method, extension=ext))
+        else:
+            result.diagnostics["wiley_raw_si_candidates"] = 0
+            result.diagnostics["wiley_selected_si"] = 0
 
         result.diagnostics["si_scan_complete"] = True
         return result

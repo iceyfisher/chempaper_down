@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
-import sys
 import time
 import traceback
 from datetime import datetime, timezone
@@ -107,12 +105,17 @@ async def run_one(request_path: Path, result_path: Path) -> int:
         event("browser_start", "Starting isolated Edge process", publisher=adapter.key)
         await worker.start()
         event("adapter", f"Running {adapter.key} adapter")
+        hint = payload.get("article_hint") or {}
         ctx = AdapterContext(
             worker=worker,
             settings=settings,
             doi=doi,
             existing_paper=existing if resume_si else None,
             previous_manifest=payload.get("previous_manifest"),
+            # Per-item hints override the job-level SI preference.
+            want_si=bool(hint.get("download_si", payload.get("download_si", True))),
+            title_query=hint.get("title_query"),
+            article_url_hint=hint.get("article_url"),
         )
         result = await adapter.run(ctx)
         result.diagnostics = {

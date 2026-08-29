@@ -118,11 +118,13 @@ class AAASAdapter(PublisherAdapter):
         article_url = await self.navigate(ctx, cloudflare=True)
         tab = ctx.tab
         journal = await self.journal_from_meta(tab, "Science Advances")
-        _, paper_dir, si_dir = self.dirs(ctx, journal)
+        year = await self.year_from_meta(tab)
+        _, paper_dir, si_dir = self.dirs(ctx, journal, year)
         result = ArticleResult(
             doi=ctx.doi,
             publisher=self.publisher_name,
             journal=journal,
+            year=year,
             article_url=article_url,
             title=await tab.title,
         )
@@ -171,38 +173,41 @@ class AAASAdapter(PublisherAdapter):
 
             await self._restore_article(ctx, article_url)
 
-        heading = await tab.query(
-            '//h2[contains(normalize-space(.), "Supplementary Materials")]',
-            timeout=12,
-            raise_exc=False,
-        )
-        candidates = await self.collect_links(
-            tab,
-            'a[href*="/doi/suppl/"][href*="/suppl_file/"]',
-        )
-        si_links = select_aaas_si(candidates)
-        result.diagnostics["aaas_supplementary_heading_found"] = bool(heading)
-        result.diagnostics["aaas_si_candidates"] = len(si_links)
-
-        for item in si_links:
-            url = item["url"]
-            extension = infer_extension(url, item["text"])
-            target = self.si_target(si_dir, ctx.doi, url, extension)
-            existing = self.existing_file_result(ctx, "si", target, url, extension)
-            if existing:
-                result.si.append(existing)
-                continue
-            path, method = await _download(
-                ctx,
+        if ctx.want_si:
+            heading = await tab.query(
+                '//h2[contains(normalize-space(.), "Supplementary Materials")]',
+                timeout=12,
+                raise_exc=False,
+            )
+            candidates = await self.collect_links(
                 tab,
-                url,
-                target,
-                extension,
-                link_text=item["text"],
+                'a[href*="/doi/suppl/"][href*="/suppl_file/"]',
             )
-            result.si.append(
-                self.file_result("si", path, url, method, extension=extension)
-            )
+            si_links = select_aaas_si(candidates)
+            result.diagnostics["aaas_supplementary_heading_found"] = bool(heading)
+            result.diagnostics["aaas_si_candidates"] = len(si_links)
+
+            for item in si_links:
+                url = item["url"]
+                extension = infer_extension(url, item["text"])
+                target = self.si_target(si_dir, ctx.doi, url, extension)
+                existing = self.existing_file_result(ctx, "si", target, url, extension)
+                if existing:
+                    result.si.append(existing)
+                    continue
+                path, method = await _download(
+                    ctx,
+                    tab,
+                    url,
+                    target,
+                    extension,
+                    link_text=item["text"],
+                )
+                result.si.append(
+                    self.file_result("si", path, url, method, extension=extension)
+                )
+        else:
+            result.diagnostics["aaas_si_candidates"] = 0
 
         result.diagnostics["si_scan_complete"] = True
         return result

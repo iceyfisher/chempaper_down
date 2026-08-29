@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,9 @@ class AdapterContext:
     doi: str
     existing_paper: Path | None = None
     previous_manifest: dict | None = None
+    want_si: bool = True
+    title_query: str | None = None
+    article_url_hint: str | None = None
     navigation_diagnostics: dict[str, object] = field(default_factory=dict)
 
     @property
@@ -201,6 +205,58 @@ class PublisherAdapter(ABC):
                     return value.strip()
         return fallback
 
+    async def title_from_meta(self, tab, fallback: str | None = None) -> str | None:
+        for selector in ('meta[name="citation_title"]', 'meta[name="DC.Title"]'):
+            try:
+                element = await asyncio.wait_for(
+                    tab.query(selector, timeout=2, raise_exc=False),
+                    timeout=3,
+                )
+            except Exception as exc:
+                if self.is_browser_disconnect(exc):
+                    raise
+                element = None
+            if element:
+                value = element.get_attribute("content")
+                if value and value.strip():
+                    return value.strip()
+        return fallback
+
+    async def year_from_meta(self, tab) -> str | None:
+        """Best-effort publication year from citation meta tags."""
+
+        selectors = [
+            'meta[name="citation_publication_date"]',
+            'meta[name="citation_date"]',
+            'meta[name="DC.Date"]',
+            'meta[name="dc.Date"]',
+            'meta[name="prism.publicationDate"]',
+            'meta[name="citation_online_date"]',
+        ]
+        for selector in selectors:
+            try:
+                element = await asyncio.wait_for(
+                    tab.query(selector, timeout=1, raise_exc=False),
+                    timeout=2,
+                )
+            except Exception as exc:
+                if self.is_browser_disconnect(exc):
+                    raise
+                element = None
+            if element:
+                value = element.get_attribute("content") or ""
+                match = re.search(r"(19|20)\d{2}", value)
+                if match:
+                    return match.group(0)
+        return None
+
+    def dirs(self, ctx: AdapterContext, journal: str, year: str | None = None) -> tuple[Path, Path, Path]:
+        label = self.article_label(ctx)
+        return make_article_dirs(ctx.settings.download_root, label, year, journal)
+
+    def article_label(self, ctx: AdapterContext) -> str:
+        return ctx.doi
+
     async def access_issue(self, tab) -> str | None:
         try:
             title = await asyncio.wait_for(tab.title, timeout=3)
@@ -241,9 +297,6 @@ class PublisherAdapter(ABC):
         if "access denied" in visible or "访问被拒绝" in visible:
             return "Publisher denied access in the current network session."
         return None
-
-    def dirs(self, ctx: AdapterContext, journal: str) -> tuple[Path, Path, Path]:
-        return make_article_dirs(ctx.settings.download_root, self.publisher_name, journal)
 
     def si_target(self, si_dir: Path, doi: str, source_url: str, extension: str) -> Path:
         digest = hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:10]

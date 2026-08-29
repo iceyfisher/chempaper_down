@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from urllib.parse import urljoin
 
@@ -168,11 +167,13 @@ class SpringerAdapter(PublisherAdapter):
                 pdf_links.append({"url": urljoin(article_url, content), "text": "citation PDF"})
         pdf_item = select_springer_pdf(pdf_links)
         journal = await self.journal_from_meta(tab, "Unknown Journal")
-        _, paper_dir, si_dir = self.dirs(ctx, journal)
+        year = await self.year_from_meta(tab)
+        _, paper_dir, si_dir = self.dirs(ctx, journal, year)
         result = ArticleResult(
             doi=ctx.doi,
             publisher=self.publisher_name,
             journal=journal,
+            year=year,
             article_url=article_url,
             title=await tab.title,
         )
@@ -188,6 +189,10 @@ class SpringerAdapter(PublisherAdapter):
                 timeout=min(ctx.settings.native_download_timeout_seconds, 45),
             )
             result.paper = self.file_result("paper", path, pdf_url, "native_navigation", extension=".pdf")
+
+        if not ctx.want_si:
+            result.diagnostics["si_scan_complete"] = True
+            return result
 
         # The PDF downloader uses a separate temporary tab, so the article tab
         # remains the correct SI discovery context. Avoid another CDP selector
