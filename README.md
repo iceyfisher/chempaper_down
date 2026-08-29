@@ -1,57 +1,36 @@
 # ChemPaper Download
 
-Download article PDFs and Supporting Information (SI) from a DOI list, plus title search on OpenAlex and CNKI (知网) search. The project provides a neo-brutalist Web interface, a native desktop window, a command-line tool, and a small HTTP API.
+通过校园网权限自动下载论文正文（PDF）与补充材料（SI）。支持 DOI 批量下载、OpenAlex 学术标题检索、知网（CNKI）中文文献检索，提供桌面应用、Web 界面、命令行与 HTTP API 四种使用方式。
 
-[中文说明](#中文说明) · [English](#english)
+<div align="center">
+  <img src="docs/screenshots/02-openalex-search.png" alt="Paper Downloader 界面" width="820">
+</div>
 
-## 中文说明
+[功能总览](#一功能总览) · [安装](#二安装) · [快速上手](#三快速上手) · [界面手册](#四图形界面使用手册) · [命令行](#五命令行手册) · [API](#六http-api-手册) · [归档规则](#七归档目录规则) · [配置参考](#八配置参考) · [故障排查](#九常见状态与故障排查) · [English](#english-version)
 
-### 支持范围
+---
 
-- ACS
-- AIP Publishing
-- AAAS / Science
-- Royal Society of Chemistry
-- Wiley
-- Springer Nature / SpringerLink
-- Elsevier / ScienceDirect，正文仅使用官方 Article Retrieval API；SI 仅使用 PII 推导的公开 `ars.els-cdn.com` PII/mmc
-- CNKI 中国知网：检索中文文献、提取 DOI 与中文标题并下载正文 PDF（知网文章没有 SI）。无法识别的 DOI 会自动作为兜底路由到知网检索
+## 一、功能总览
 
-下载器会识别 PDF、ZIP、Office 文件、图片和视频等常见 SI 格式。
+| 出版社 / 数据源 | 正文 | 补充材料 SI | 说明 |
+|---|---|---|---|
+| ACS | ✅ | ✅ | 校园网权限，自动过 Cloudflare 挑战 |
+| AIP Publishing | ✅ | ✅ | |
+| AAAS / Science | ✅ | ✅ | |
+| Royal Society of Chemistry | ✅ | ✅ | |
+| Wiley | ✅ | ✅ | 自动使用 600 秒整篇预算 |
+| Springer Nature / SpringerLink | ✅ | ✅ | |
+| Elsevier / ScienceDirect | ✅ 官方 API | ✅ 公开 CDN | 需要配置 `ELSEVIER_API_KEY` |
+| **CNKI 中国知网** | ✅ | ❌ 无 SI | 检索中文文献，提取 DOI 与中文标题，下载正文 PDF |
+| **OpenAlex** | 🔍 仅检索 | — | 免费开源学术数据库，标题 → DOI 解析 |
 
-同一 DOI 可以重复提交。正文和 SI 都通过校验时会直接跳过；如果只缺一个附件，程序会保留正文和已经下载好的 SI，只补缺失部分。
+无法识别的 DOI 会自动兜底路由到知网检索。SI 支持识别 PDF、ZIP、Office 文档、图片、视频等格式。同一 DOI 重复提交会自动跳过；只缺部分附件时保留已下载内容，只补缺失部分。
 
-### 归档目录
+## 二、安装
 
-每篇文章归档到独立目录，目录名由 DOI、年份和期刊组成，内含 `pdf/` 与 `si/` 两个子文件夹：
+要求：Windows 10/11、Python 3.11+、Microsoft Edge、校园网（或可访问出版社的网络）。Elsevier 官方 API 需要额外的 API key。
 
-```text
-downloads/
-├─ 10.1021_acs.catal.6c02592_2026_ACS Catalysis/
-│  ├─ pdf/          # 正文 <doi>.pdf
-│  └─ si/           # 补充材料 <doi>_si_<hash>.<ext>
-├─ 10.19799_j.cnki.2095-4239.2023.0001_2023_储能科学与技术/
-│  └─ pdf/          # 知网文章只有正文
-├─ _jobs/           # 任务状态
-├─ _logs/           # DOI 子进程日志
-├─ _manifests/      # 每篇论文的结果清单
-├─ _search_runs/    # 知网检索子进程结果
-└─ _worker_runs/    # 子进程工作目录
-```
-
-年份取自出版社页面的 citation 元数据或 Elsevier API 的 coverDate；确实拿不到时使用 `unknown`。旧版 `<Publisher - Journal>/paper/` 目录仍会被重复下载检查识别，已有的下载不会重复。
-
-### 运行要求
-
-- Windows 10 或 Windows 11
-- Python 3.11 或更高版本
-- Microsoft Edge
-- 可访问出版社网页的网络环境（校园网权限）
-- Elsevier API key（仅 Elsevier 官方 API 需要）
-
-### 安装
-
-推荐为项目创建单独的 Conda 环境：
+推荐使用独立 Conda 环境：
 
 ```powershell
 git clone https://github.com/iceyfisher/chempaper_down.git
@@ -64,52 +43,140 @@ python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-如果你想先按 `requirements.txt` 安装依赖：
+也可以先按 `requirements.txt` 装依赖再装本体：
 
 ```powershell
 python -m pip install -r requirements.txt
 python -m pip install -e . --no-deps
 ```
 
-检查入口是否可用：
+安装后共有 5 个入口命令：
+
+| 命令 | 用途 |
+|---|---|
+| `paper-tool-app` | **桌面应用**（推荐，pywebview 原生窗口） |
+| `paper-tool-server` | Web 服务（浏览器访问） |
+| `paper-tool` | 命令行批量下载 |
+| `paper-tool-agent` | 上游 AI Agent 客户端 |
+| `paper-tool-worker` | 内部单 DOI 工作进程（勿直接调用） |
+
+PowerShell 找不到命令时不必改 PATH，直接用绝对路径：
 
 ```powershell
-paper-tool --help
-paper-tool-server --help
-paper-tool-app --help
+& "$env:CONDA_PREFIX\Scripts\paper-tool-app.exe"
 ```
 
-### 桌面应用 / Web GUI
+> 桌面窗口依赖 pywebview，随 `pip install -e .` 一起安装；若该包安装失败，`paper-tool-app` 会自动改用默认浏览器打开同一界面。
 
-推荐直接启动桌面窗口（pywebview 原生窗口，关闭窗口即退出）：
+## 三、快速上手
 
-```powershell
-paper-tool-app
+三分钟下载第一篇论文：
+
+1. 连接校园网，确认能打开出版社网页。
+2. 启动：`paper-tool-app`（或 `paper-tool-server` 后访问 http://127.0.0.1:8765）。
+3. 在 **① DOI 批量下载** 标签页粘贴一个 DOI，例如 `10.1021/acs.catal.6c02592`。
+4. 点击 **🚀 开始批量下载**。页面自动跳到 **④ 任务与结果**，实时显示进度。
+5. 完成后在 `downloads/<DOI>_<年份>_<期刊>/pdf/` 里找到正文 PDF。
+
+## 四、图形界面使用手册
+
+### 4.1 ① DOI 批量下载
+
+![DOI 批量下载](docs/screenshots/01-doi-batch.png)
+
+**操作步骤**：左侧文本框粘贴 DOI（每行一个）→ 点击 **🚀 开始批量下载**。
+
+支持三种输入方式：
+
+| 方式 | 操作 | 支持格式 |
+|---|---|---|
+| 直接粘贴 | 文本框粘贴后点"开始批量下载" | `10.1021/xxx`、`https://doi.org/10.1002/xxx`，可混入其他文字（自动正则提取） |
+| 上传清单 | 点"上传清单并开始" | TXT/MD、JSON、JSONL/NDJSON、CSV/TSV |
+| 本地路径 | 填路径后点"读取路径并开始" | 同上（路径需服务进程可访问） |
+
+清单文件示例：
+
+```text
+# list.txt —— 每行一个 DOI，# 开头的注释会被忽略
+10.1021/acs.catal.6c02592
+https://doi.org/10.1002/adom.202400123
 ```
 
-未安装 pywebview 时会自动改用默认浏览器打开同一个界面。也可以只用 Web 服务：
-
-```powershell
-paper-tool-server `
-  --host 127.0.0.1 `
-  --port 8765 `
-  --download-root .\downloads
+```json
+// list.json —— 自动递归查找 doi / DOI / doiUrl 字段
+{
+  "query": "photocatalysis",
+  "papers": [
+    {"doi": "10.1039/d6qo00853d", "score": 0.95},
+    {"doi": "10.1007/s11244-024-01234-5"}
+  ]
+}
 ```
 
-浏览器打开：http://127.0.0.1:8765
+```csv
+title,doi
+Example A,10.1021/acs.joc.0000001
+```
 
-界面分四个标签页：
+**参数**（在 ④ 任务与结果 页设置，对所有提交方式生效）：
 
-1. **① DOI 批量下载**：粘贴 DOI / DOI URL，或上传 TXT/JSON/JSONL/CSV 清单、读取本地清单路径。并发数 1–4，硬超时 180/210/240 秒。
-2. **② 学术标题检索（OpenAlex）**：输入标题或关键词检索 OpenAlex 并提取 DOI；每条结果旁有三个按钮——**复制 DOI**、**下载原文**（跳过 SI）、**下载原文+SI**。下方支持高通量批量解析：一行一个标题（最多 500 条），逐条解析出最匹配的 DOI，可勾选后整批下载或一键复制全部 DOI。
-3. **③ 知网检索（CNKI）**：通过独立 Edge 子进程访问知网页面检索中文文献，返回标题、年份、DOI（如有）。知网文章没有 SI，只提供复制 DOI 与下载原文。
-4. **④ 任务与结果**：实时轮询任务进度，展示每篇论文的状态、出版社、期刊、年份、SI 计数与耗时。
+- **并发**：同时运行的浏览器子进程数量（1–4）。50 篇以上的大批量建议从 2 开始，确认网络与内存稳定后再提到 3–4。
+- **硬超时**：单篇最长等待（180/210/240 秒）。大附件或慢网络选更长；Wiley 与 Elsevier 内部固定 600 秒预算，不受此选项影响。
 
-"下载原文"（不带 SI）通过任务级/条目级 `download_si` 开关实现，各出版社 adapter 会完整跳过 SI 扫描，结果可以直接达到 `success`。
+### 4.2 ② 学术标题检索（OpenAlex）
 
-### 命令行
+![OpenAlex 检索](docs/screenshots/02-openalex-search.png)
 
-直接提交一个或多个 DOI：
+**单条检索**：输入文章标题或关键词 → 点击 **🔍 检索** → OpenAlex 返回相关度排序的结果列表。
+
+每条结果包含标题、年份、期刊、被引次数、OA 标记，以及三个固定按钮：
+
+| 按钮 | 行为 |
+|---|---|
+| 📋 **复制 DOI** | 复制该条目的 DOI |
+| ⬇ **下载原文** | 提交下载任务，**跳过 SI 扫描**（更快，状态可达 success） |
+| 🧪 **下载原文+SI** | 提交下载任务，同时下载正文与全部补充材料 |
+
+点击下载按钮会弹出确认框，确认后自动创建任务并跳到结果页。
+
+**高通量批量解析**（下方紫色卡片）：适合手头有一批纯标题的场景。
+
+1. 文本框内**一行一个标题**粘贴（最多 500 条）。
+2. 点击 **⚙️ 批量解析 DOI**，确认后逐条请求 OpenAlex（每条约 0.2 秒，500 条约 2 分钟）。
+3. 解析结果逐行显示匹配标题、DOI 与**相似度徽章**（绿色 = 高置信匹配，红色 = 相似度低于 0.72 的存疑匹配，建议人工核对）。
+4. 使用底部按钮整批操作：**下载选中（原文+SI）**、**下载选中（仅原文）**、**复制选中 DOI**。
+
+> 提示：在单条检索框输入内容后点 **转入批量解析**，可把当前关键词直接带入批量输入框。中文标题在 OpenAlex 覆盖有限，请改用 ③ 知网检索。
+
+### 4.3 ③ 知网检索（CNKI）
+
+![知网检索](docs/screenshots/03-cnki-search.png)
+
+**前置条件**：已连接校园网且机构拥有知访问权限；`kns.cnki.net` 可达。
+
+**操作步骤**：
+
+1. 输入中文标题或关键词（如 `锂离子电池 界面改性`）。
+2. 选择超时（60/120/180 秒），点击 **🔍 检索知网**，并在确认框中确认。
+3. 程序启动一个独立的 Edge 子进程访问知网页面，约 30–120 秒后返回结果。
+4. 每条结果提供 **复制 DOI** 与 **下载原文**；知网文章没有 SI，不提供 SI 按钮。
+
+说明：
+
+- 知网检索结果会尝试提取 DOI；**没有登记 DOI 的中文文章也能直接下载**——程序通过文章页直链完成 PDF/CAJ 下载。
+- 提取到的 DOI 与中文标题会写入归档结果（`downloads/_manifests/`）。
+- 若知网弹出验证码，请先在普通浏览器完成一次验证后重试。
+- 检索与下载互不影响：检索只读页面，下载走完整的单篇子进程管线。
+
+### 4.4 ④ 任务与结果
+
+![任务与结果](docs/screenshots/04-jobs-results.png)
+
+提交任何任务后此页自动轮询（每 2.5 秒刷新），显示每篇论文的 DOI、状态、来源出版社、期刊、年份、正文/SI 计数、耗时与阶段信息。顶部四张卡片为任务总数 / 已完成 / 运行中 / 当前 Job 编号；**■ 取消当前 Job** 会终止所有活动子进程及其 Edge 进程树。
+
+## 五、命令行手册
+
+直接提交 DOI：
 
 ```powershell
 paper-tool `
@@ -119,7 +186,7 @@ paper-tool `
   --download-root .\downloads
 ```
 
-从 TXT 读取：
+从清单文件读取：
 
 ```powershell
 paper-tool `
@@ -130,33 +197,131 @@ paper-tool `
   --json-output .\download_results.json
 ```
 
-JSON 清单中的 DOI 字段默认名为 `doi`：
+JSON 清单指定字段名（默认 `doi`）：
 
 ```powershell
-paper-tool `
-  --input .\example_agent_manifest.json `
-  --doi-field doi `
-  --download-root .\downloads
+paper-tool --input .\example_agent_manifest.json --doi-field doi
 ```
 
-### 检索 API
+全部参数：
 
-```http
-GET  /api/search/academic?q=<标题或关键词>&limit=10     # OpenAlex 相关性检索
-POST /api/search/academic/batch {"titles": ["...", "..."]}  # 批量标题→DOI 解析（带相似度）
-GET  /api/search/cnki?q=<中文标题或关键词>              # 知网检索（独立浏览器子进程）
-POST /api/jobs/items {"items": [{"doi": "...", "download_si": true}]}  # 按条目提交下载
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--input` / `--dois` | 二选一必填 | 清单文件路径 / 逗号分隔 DOI 文本 |
+| `--doi-field` | `doi` | JSON/CSV 清单中的 DOI 字段名 |
+| `--download-root` | `downloads` | 归档根目录 |
+| `--concurrency` | `2` | 并发子进程数（1–4） |
+| `--article-timeout` | `120` | 单篇硬超时（秒） |
+| `--json-output` | 无 | 结果 JSON 输出路径 |
+
+## 六、HTTP API 手册
+
+服务启动后（默认 `http://127.0.0.1:8765`）可用以下接口编程调用。
+
+### 6.1 检索
+
+```bash
+# OpenAlex 相关性检索
+curl "http://127.0.0.1:8765/api/search/academic?q=photocatalytic%20nitrate%20reduction&limit=5"
+
+# 批量标题 → DOI 解析（返回相似度与 resolved 标记）
+curl -X POST http://127.0.0.1:8765/api/search/academic/batch ^
+  -H "Content-Type: application/json" ^
+  -d "{\"titles\":[\"Article title one\",\"Article title two\"]}"
+
+# 知网检索（独立浏览器子进程，可能耗时 30-120 秒）
+curl "http://127.0.0.1:8765/api/search/cnki?q=锂离子电池界面改性&timeout=120"
 ```
 
-`/api/jobs/items` 的每个条目可以携带 `title_query`、`article_url`（知网直跳）与独立的 `download_si` 覆盖。所有既有端点（`/api/jobs`、`/api/jobs/upload`、`/api/jobs/path`、`/api/agent/*`）都新增了 `download_si` 字段，默认 `true`，行为与旧版一致。
+### 6.2 提交下载
 
-OpenAlex 免费无需 key；在 `.env` 中设置 `OPENALEX_MAILTO=you@example.com` 可进入 polite pool 获得更稳定的限流。
+```bash
+# 文本批量提交（自动正则提取 DOI）
+curl -X POST http://127.0.0.1:8765/api/jobs ^
+  -H "Content-Type: application/json" ^
+  -d "{\"doi_text\":\"10.1021/acs.catal.6c02592\",\"download_si\":true}"
 
-### Elsevier
+# 按条目提交（检索结果 → 一键下载；每条可独立控制 SI 与提示信息）
+curl -X POST http://127.0.0.1:8765/api/jobs/items ^
+  -H "Content-Type: application/json" ^
+  -d "{\"items\":[{\"doi\":\"10.1021/acs.catal.6c02592\",\"download_si\":false}]}"
 
-Elsevier 正文仅使用官方 Article Retrieval API。SI 从论文 PII 构造公开的 `ars.els-cdn.com/content/image/1-s2.0-<PII>-mmcN.<扩展名>` 地址下载。运行前必须在启动服务的同一个终端设置 key：
+# 上传清单 / 本地路径 / Agent 清单
+curl -X POST "http://127.0.0.1:8765/api/jobs/upload?download_si=true" -F "file=@list.txt"
+curl -X POST http://127.0.0.1:8765/api/jobs/path -H "Content-Type: application/json" ^
+  -d "{\"input_path\":\"D:\\\\data\\\\list.json\",\"doi_field\":\"doi\"}"
+curl -X POST http://127.0.0.1:8765/api/agent/jobs ^
+  -H "Content-Type: application/json" ^
+  -d "{\"input_path\":\"D:\\\\data\\\\search_batch.json\",\"job_tag\":\"batch-01\"}"
+```
 
-推荐将长期配置写入项目根目录的 `.env`（该文件已被 Git 忽略）：
+`/api/jobs/items` 的每个条目字段：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `doi` | ✅ | DOI，或 `cnki:<文章页URL>` 直链键 |
+| `title_query` | ❌ | 标题提示（知网检索备用） |
+| `article_url` | ❌ | 文章页直链（知网跳过搜索直达下载） |
+| `download_si` | ❌ 默认 `true` | 条目级 SI 开关，覆盖任务级设置 |
+
+### 6.3 轮询与取消
+
+```bash
+curl http://127.0.0.1:8765/api/jobs/<job_id>            # 任务状态
+curl http://127.0.0.1:8765/api/jobs/<job_id>/results    # 全部条目结果
+curl -X POST http://127.0.0.1:8765/api/jobs/<job_id>/cancel
+```
+
+Job 状态机：`queued → running → completed | failed | cancelled`。单篇条目终态见第九节。
+
+### 6.4 其他
+
+- `GET /api/health`：版本、架构与出版社列表。
+- 上游 AI Agent 对接规范见 [AGENT.md](AGENT.md)。
+
+## 七、归档目录规则
+
+每篇文章一个独立目录，目录名 = `DOI_年份_期刊`，内含 `pdf/` 与 `si/` 两个子文件夹：
+
+```text
+downloads/
+├─ 10.1021_acs.catal.6c02592_2026_ACS Catalysis/
+│  ├─ pdf/                                    # 正文：<doi>.pdf
+│  └─ si/                                     # SI：<doi>_si_<url哈希>.<扩展名>
+├─ 10.19799_j.cnki.2095-4239.2023.0001_2023_储能科学与技术/
+│  └─ pdf/                                    # 知网文章只有正文
+├─ _jobs/          # 任务状态 JSON（重启后仍可查看）
+├─ _logs/          # 每个子进程的完整日志
+├─ _manifests/     # 每篇论文的最终结果清单（排查用）
+├─ _search_runs/   # 知网检索子进程的原始结果
+└─ _worker_runs/   # 子进程工作目录（request/result）
+```
+
+- 年份取自出版社页面 citation 元数据（`citation_publication_date` 等）或 Elsevier `coverDate`；取不到时为 `unknown`。
+- **旧版目录完全兼容**：旧结构 `<出版社 - 期刊>/paper/` 中的已下载文件仍会被重复检查识别，不会重复下载。
+- 重复提交规则：正文 + SI 全部校验通过 → `skipped_duplicate` 直接跳过；只缺 SI → 保留正文，仅补 SI。
+
+## 八、配置参考
+
+长期配置写入项目根目录 `.env`（已被 Git 忽略），服务与子进程自动读取；已存在的系统环境变量优先。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `ELSEVIER_API_KEY` | 无 | Elsevier 官方 Article Retrieval API 密钥（仅 Elsevier 需要） |
+| `OPENALEX_MAILTO` | 无 | 你的邮箱，进入 OpenAlex polite pool 获得更稳定限流 |
+| `PAPER_TOOL_DOWNLOAD_ROOT` | `downloads` | 归档根目录 |
+| `PAPER_TOOL_CONCURRENCY` | `2` | 默认并发 |
+| `PAPER_TOOL_ARTICLE_TIMEOUT` | `120` | 常规单篇硬超时（秒） |
+| `PAPER_TOOL_WILEY_TIMEOUT` | `600` | Wiley 单篇预算 |
+| `PAPER_TOOL_ELSEVIER_TIMEOUT` | `600` | Elsevier 单篇预算 |
+| `PAPER_TOOL_NAV_TIMEOUT` | `30` | 页面导航软超时 |
+| `PAPER_TOOL_NATIVE_TIMEOUT` | `35` | 原生下载等待 |
+| `PAPER_TOOL_BLOB_TIMEOUT` | `75` | 页内 fetch/Blob 下载等待 |
+| `PAPER_TOOL_CLOUDFLARE_TIMEOUT` | `30` | Cloudflare 挑战处理等待 |
+| `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER` | `1` | 是否启用 Pydoll Cloudflare 助手 |
+| `PAPER_TOOL_KILL_GRACE` | `5` | 子进程终止宽限（秒） |
+
+`.env` 示例：
 
 ```dotenv
 ELSEVIER_API_KEY=your-key
@@ -164,217 +329,108 @@ PAPER_TOOL_ELSEVIER_TIMEOUT=600
 OPENALEX_MAILTO=you@example.com
 ```
 
-服务和 DOI 子进程会自动读取启动工作目录中的 `.env`。已经存在的系统环境变量优先，不会被 `.env` 覆盖。也可以只为当前终端临时设置：
+> API key 只通过服务进程环境传递给子进程，不会写入源码、结果 JSON 或 `_worker_runs/request.json`。
 
-```powershell
-$env:ELSEVIER_API_KEY = "your-key"
-$env:PAPER_TOOL_ELSEVIER_TIMEOUT = "600"
-```
+## 九、常见状态与故障排查
 
-API key 只通过服务进程环境传给 DOI 子进程，不会写入源码、结果 JSON 或 `_worker_runs/request.json`。正文 PDF 请求使用 `httpAccept=application/pdf`。SI 的有限 PII/mmc 探测正常完成且得到 0 个候选时，表示已确认没有 SI，`0/0` 可以成为完整 bundle；缺少 PII、401/403/429 或网络错误则属于扫描未完成，不能解释成"文章没有 SI"。选择"下载原文（不带 SI）"时会完整跳过该探测。
+### 条目状态含义
 
-### 下载结果
+| 状态 | 含义 | 处理建议 |
+|---|---|---|
+| `success` | 正文与全部 SI 下载并校验通过 | 无需处理 |
+| `partial` | 正文或部分 SI 成功，仍有缺失 | 查看 manifest 的 `error` 字段定位失败附件，重新提交只补缺失 |
+| `skipped_duplicate` | 已下载且校验完整，自动跳过 | 正常 |
+| `failed` | 未获得有效结果 | 看 `_logs/<doi>_<run>.log`；常见为权限不足、验证码、页面改版 |
+| `timeout` | 超过整篇硬预算被终止 | 提高超时或降低并发后重试 |
+| `browser_crashed` | Pydoll/Edge 连接中断 | 直接重试；持续出现则降并发为 1 |
+| `process_error` | 子进程异常退出无结果 | 查看 log 末尾 traceback |
 
-常见状态：
+### FAQ
 
-- `success`：正文和发现的 SI 都下载成功
-- `partial`：正文或部分 SI 成功，仍有附件失败
-- `failed`：该 DOI 没有得到有效结果
-- `timeout`：超过整篇硬预算
-- `skipped_duplicate`：正文和 SI 已经完整校验
+**`paper-tool-server` / `paper-tool-app` 无法识别**：Conda 环境未激活，或用 `& "$env:CONDA_PREFIX\Scripts\paper-tool-server.exe"` 直接运行。
 
-### 常见问题
+**任务一直 `running` 不结束**：单篇超过硬超时后父进程会强制终止子进程与 Edge（最长再等 5 秒），最终一定落到终态；大批量时优先降并发。
 
-`paper-tool-server` 无法识别：确认 Conda 环境已经激活，或使用 `$env:CONDA_PREFIX\Scripts\paper-tool-server.exe`。
+**Edge 卡住或页面很慢**：并发降为 1，超时调到 210/240 秒。Wiley 固定 600 秒预算，调 GUI 超时对它无效。
 
-任务显示 `partial`：先看 `downloads/_manifests/<doi>.json` 中失败附件的 `error`，再查看 diagnostics 里的日志路径。直接重新提交同一 DOI 即可，已校验文件不会重复下载。
+**Elsevier 提示 API key 相关失败**：确认启动服务的同一终端已设置 `ELSEVIER_API_KEY`（或写入 `.env`）；401/403 表示 key 无 Article Retrieval 权限。
 
-Edge 卡住或网页加载很慢：先把并发降到 1，再把常规超时调到 210 或 240 秒。Wiley 已使用 600 秒整篇预算，单纯提高 GUI 超时不会改变它的预算。
+**知网检索/下载失败**：确认校园网可达知网且机构已授权；出现验证码先人工完成一次验证；无 DOI 文章请从知网检索结果点"下载原文"（走文章页直链）。
 
-知网检索/下载失败：确认校园网可达 `kns.cnki.net` 且机构已授权；知网偶发验证码时需要人工在浏览器完成一次验证后重试。无法匹配 DOI 的中文文章可从知网检索结果直接点"下载原文"，程序会通过文章页直链完成下载。
+**下载的 PDF 打不开**：查看 `_manifests/<doi>.json` 中该文件的 `error`（如 `html_instead_of_file` 表示拿到的是权限拦截页），重新提交即可增量补下。
+
+---
 
 ## English Version
 
-### Supported Publishers
+### Overview
 
-* ACS
-* AIP Publishing
-* AAAS / Science
-* Royal Society of Chemistry
-* Wiley
-* Springer Nature / SpringerLink
-* Elsevier / ScienceDirect: the main article is retrieved exclusively through the official Article Retrieval API; Supporting Information (SI) is downloaded only from publicly accessible `ars.els-cdn.com` PII/mmc URLs derived from the article PII.
-* CNKI (中国知网): search Chinese literature, extract DOI and Chinese title, and download the main PDF (CNKI articles have no SI). Unrecognized DOIs fall back to a CNKI search automatically.
+Automated article PDF + Supporting Information (SI) downloader over campus-network entitlements, with DOI batch download, OpenAlex title search, and CNKI (知网) search for Chinese literature. Ships as a desktop app (pywebview), a web UI, a CLI and an HTTP API.
 
-The downloader supports common SI formats, including PDF, ZIP, Microsoft Office files, images, and videos.
+| Source | PDF | SI | Notes |
+|---|---|---|---|
+| ACS / AIP / AAAS / RSC / Wiley / Springer | ✅ | ✅ | Browser adapters, Cloudflare-aware |
+| Elsevier | ✅ official API | ✅ public CDN | requires `ELSEVIER_API_KEY` |
+| CNKI | ✅ | ❌ | DOI + Chinese title extraction, main PDF only |
+| OpenAlex | 🔍 search only | — | free title → DOI resolution |
 
-The same DOI can be submitted multiple times. If both the main article and SI have already passed validation, the task will be skipped automatically. If only one attachment is missing, the program preserves the existing article and previously downloaded SI files and downloads only the missing files.
-
-### Archive Layout
-
-Each article is archived into its own folder named after DOI, year and journal, with `pdf/` and `si/` subfolders:
-
-```text
-downloads/
-├─ 10.1021_acs.catal.6c02592_2026_ACS Catalysis/
-│  ├─ pdf/
-│  └─ si/
-├─ _jobs/
-├─ _logs/
-├─ _manifests/
-├─ _search_runs/
-└─ _worker_runs/
-```
-
-The year comes from citation meta tags or the Elsevier coverDate; `unknown` is used when unavailable. The legacy `<Publisher - Journal>/paper/` layout is still recognized by the duplicate check, so existing downloads are never repeated.
-
-### Requirements
-
-* Windows 10 or Windows 11
-* Python 3.11 or later
-* Microsoft Edge
-* A network environment with access to publisher websites (campus network entitlement)
-* Elsevier API key (required only for the official Elsevier API)
-
-### Installation
-
-It is recommended to create a dedicated Conda environment for the project:
+### Install
 
 ```powershell
 git clone https://github.com/iceyfisher/chempaper_down.git
 cd chempaper_down
-
 conda create -n chem-paper-agent python=3.11 -y
 conda activate chem-paper-agent
-
-python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-Check whether the command-line entry points are available:
+Requires Windows 10/11, Python 3.11+, Microsoft Edge and campus-network access.
+
+### Entry points
+
+| Command | Purpose |
+|---|---|
+| `paper-tool-app` | Native desktop window (pywebview; falls back to the default browser) |
+| `paper-tool-server` | Web UI + API at http://127.0.0.1:8765 |
+| `paper-tool` | CLI batch downloader |
+
+### Web UI
+
+Four tabs: **① DOI batch download** (paste TXT/JSON/JSONL/CSV lists; concurrency 1–4; hard timeout 180/210/240 s), **② OpenAlex title search** (every row offers Copy DOI / Download PDF / Download PDF+SI; batch box resolves up to 500 titles with similarity scores), **③ CNKI search** (isolated Edge subprocess, Copy DOI + Download PDF, no SI by design), **④ Jobs & results** (live polling, cancel support).
+
+### CLI
 
 ```powershell
-paper-tool --help
-paper-tool-server --help
-paper-tool-app --help
+paper-tool --dois "10.1021/acs.catal.6c02592" --concurrency 2 --article-timeout 180 --download-root .\downloads
+paper-tool --input .\example_doi_list.txt --json-output .\results.json
+paper-tool --input .\manifest.json --doi-field doi
 ```
 
-### Desktop App / Web GUI
+### API
 
-Launch the native desktop window (pywebview shell; closing the window quits):
-
-```powershell
-paper-tool-app
+```bash
+GET  /api/search/academic?q=<query>&limit=10          # OpenAlex search
+POST /api/search/academic/batch {"titles":[...]}      # batch title → DOI
+GET  /api/search/cnki?q=<query>&timeout=120           # CNKI search (subprocess)
+POST /api/jobs             {"doi_text":"...", "download_si":true}
+POST /api/jobs/items       {"items":[{"doi":"...","download_si":false}]}
+POST /api/jobs/upload | /api/jobs/path | /api/agent/jobs | /api/agent/content
+GET  /api/jobs/{id} · GET /api/jobs/{id}/results · POST /api/jobs/{id}/cancel
 ```
 
-Without pywebview the same UI opens in the default browser. Web-only mode:
-
-```powershell
-paper-tool-server --host 127.0.0.1 --port 8765 --download-root .\downloads
-```
-
-Open `http://127.0.0.1:8765`. The UI has four tabs:
-
-1. **DOI batch download** — paste DOIs or upload TXT/JSON/JSONL/CSV manifests; concurrency 1–4, hard timeout 180/210/240 s.
-2. **OpenAlex title search** — search by title/keyword and extract DOIs; every result row offers **Copy DOI**, **Download PDF** (no SI) and **Download PDF+SI**. A high-throughput batch box resolves up to 500 titles to their best-matching DOIs.
-3. **CNKI search** — an isolated Edge subprocess searches CNKI for Chinese literature and returns title/year/DOI; CNKI rows offer Copy DOI and Download PDF only (no SI).
-4. **Jobs & results** — live polling of job progress with status, publisher, journal, year, SI counters and elapsed time.
-
-"Download PDF" (without SI) is implemented through a job-/item-level `download_si` switch; adapters skip the SI scan entirely so such tasks can reach `success` directly.
-
-### Search API
-
-```http
-GET  /api/search/academic?q=<query>&limit=10
-POST /api/search/academic/batch {"titles": ["...", "..."]}
-GET  /api/search/cnki?q=<query>
-POST /api/jobs/items {"items": [{"doi": "...", "download_si": true}]}
-```
-
-Each `/api/jobs/items` entry may carry `title_query`, `article_url` (direct CNKI article link) and a per-item `download_si` override. All existing endpoints accept a `download_si` field (default `true`, matching the legacy behavior).
-
-OpenAlex is free; set `OPENALEX_MAILTO=you@example.com` in `.env` to join the polite pool.
-
-### Command Line
-
-Submit one or more DOIs directly:
-
-```powershell
-paper-tool `
-  --dois "10.1039/d6qo00853d,10.1021/acscatal.6c02592" `
-  --concurrency 2 `
-  --article-timeout 180 `
-  --download-root .\downloads
-```
-
-Read DOIs from a TXT file:
-
-```powershell
-paper-tool `
-  --input .\example_doi_list.txt `
-  --concurrency 2 `
-  --article-timeout 180 `
-  --download-root .\downloads `
-  --json-output .\download_results.json
-```
-
-The default DOI field name in a JSON manifest is `doi`:
-
-```powershell
-paper-tool `
-  --input .\example_agent_manifest.json `
-  --doi-field doi `
-  --download-root .\downloads
-```
-
-### Elsevier
-
-For Elsevier, the main article is retrieved exclusively through the official Article Retrieval API. SI files are downloaded using publicly accessible URLs constructed from the article PII in the following format:
-
-```text
-ars.els-cdn.com/content/image/1-s2.0-<PII>-mmcN.<extension>
-```
-
-Before running the program, the API key must be configured in the same terminal used to start the service.
-
-For persistent configuration, add the following settings to a `.env` file in the project root (already ignored by Git):
-
-```dotenv
-ELSEVIER_API_KEY=your-key
-PAPER_TOOL_ELSEVIER_TIMEOUT=600
-```
-
-The service and DOI worker subprocesses automatically load the `.env` file from the working directory where the service was started. Existing system environment variables take precedence. Alternatively, set the variables temporarily for the current terminal session:
-
-```powershell
-$env:ELSEVIER_API_KEY = "your-key"
-$env:PAPER_TOOL_ELSEVIER_TIMEOUT = "600"
-```
-
-The API key is passed to DOI worker subprocesses only through the service process environment. It is never written to the source code, result JSON files, or `_worker_runs/request.json`.
-
-Main article PDF requests use `httpAccept=application/pdf`. If the limited PII/mmc SI probing process completes normally and returns zero candidates, the article is considered to have no SI. Missing PII, HTTP 401/403/429 responses, or network errors indicate that the SI scan was not completed and must not be interpreted as "no SI". When "Download PDF (no SI)" is requested the probing is skipped entirely.
-
-### Download Results
+### Archive layout
 
 ```text
 downloads/<doi>_<year>_<journal>/pdf|si
+downloads/_jobs | _logs | _manifests | _search_runs | _worker_runs
 ```
 
-Common task statuses:
+The year comes from citation meta tags or the Elsevier coverDate (`unknown` if unavailable). The legacy `<Publisher - Journal>/paper/` layout is still recognized by the duplicate check.
 
-* `success`: The main article and all discovered SI files were downloaded successfully.
-* `partial`: The main article or some SI files were downloaded successfully, but one or more attachments still failed.
-* `failed`: No valid result was obtained for the DOI.
-* `timeout`: The task exceeded the hard time budget for the entire article.
-* `skipped_duplicate`: The main article and SI files have already been fully downloaded and validated.
+### Configuration
 
-### Troubleshooting
+All settings live in `.env` (Git-ignored): `ELSEVIER_API_KEY`, `OPENALEX_MAILTO`, `PAPER_TOOL_DOWNLOAD_ROOT`, `PAPER_TOOL_CONCURRENCY`, `PAPER_TOOL_ARTICLE_TIMEOUT`, `PAPER_TOOL_WILEY_TIMEOUT`, `PAPER_TOOL_ELSEVIER_TIMEOUT`, `PAPER_TOOL_NAV_TIMEOUT`, `PAPER_TOOL_NATIVE_TIMEOUT`, `PAPER_TOOL_BLOB_TIMEOUT`, `PAPER_TOOL_CLOUDFLARE_TIMEOUT`, `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER`, `PAPER_TOOL_KILL_GRACE`. Existing system environment variables take precedence.
 
-**`paper-tool-server` is not recognized** — make sure the Conda environment is activated, or run the executable directly from `$env:CONDA_PREFIX\Scripts`.
+### Statuses & troubleshooting
 
-**A task shows `partial`** — inspect the `error` field in `downloads/_manifests/<doi>.json` and the log path under `diagnostics`. Resubmitting the same DOI is safe; validated files are not downloaded again.
-
-**Edge becomes unresponsive or pages load slowly** — reduce concurrency to `1` and raise the timeout to `210` or `240` seconds. Wiley already uses a 600-second per-article budget.
-
-**CNKI search/download fails** — verify `kns.cnki.net` is reachable through the campus network and the institution is entitled. When CNKI shows a CAPTCHA, solve it once manually in a browser and retry. Chinese articles without a DOI can still be downloaded directly from a CNKI search row via the article-page link.
+`success` · `partial` (inspect `downloads/_manifests/<doi>.json`) · `skipped_duplicate` · `failed` (see `downloads/_logs`) · `timeout` · `browser_crashed` (retry, then lower concurrency) · `process_error`. For Elsevier 401/403 check the API key entitlement; for CNKI failures verify campus entitlement and solve the CAPTCHA once manually.
