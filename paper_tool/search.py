@@ -3,6 +3,16 @@
 Pure-HTTP module: it never touches Pydoll/Edge, so it is safe to call from the
 API process. OpenAlex is free (no key); a mailto address opts into the polite
 pool. Set OPENALEX_MAILTO in .env to receive better rate limits.
+
+Connectivity strategy: campus/proxy setups differ wildly in how (or whether)
+they can reach OpenAlex. Every request walks three modes and remembers the
+first that worked:
+
+1. "env"     - honor http_proxy/https_proxy environment variables;
+2. "direct"  - normal DNS + direct TLS (works on most campus networks);
+3. "doh"     - resolve the host through a domestic DoH resolver (223.5.5.5)
+               and connect by IP with SNI/Host overrides. This survives broken
+               foreign DNS without any local proxy software.
 """
 
 from __future__ import annotations
@@ -10,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from urllib.parse import unquote
@@ -18,12 +29,67 @@ import httpx
 
 
 OPENALEX_API = "https://api.openalex.org/works"
+OPENALEX_HOST = "api.openalex.org"
+DOH_RESOLVERS = (
+    "https://223.5.5.5/resolve",
+    "https://223.6.6.6/resolve",
+    "https://120.53.53.53/resolve",
+)
+DOH_CACHE_TTL_SECONDS = 600
 SELECT_FIELDS = (
     "id,doi,title,display_name,publication_year,primary_location,"
     "cited_by_count,open_access,authorships"
 )
 DOI_PREFIX_RE = re.compile(r"^https?://(?:dx\.)?doi\.org/", re.IGNORECASE)
 REQUEST_TIMEOUT = httpx.Timeout(connect=15, read=30, write=15, pool=15)
+TRANSIENT_ERRORS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.WriteTimeout,
+    httpx.PoolTimeout,
+    httpx.RemoteProtocolError,
+)
+
+# "env" honors http_proxy/https_proxy variables; "direct" bypasses them; "doh"
+# resolves through a domestic DoH resolver and dials the IP directly.
+_CLIENT_MODES = ("env", "direct", "doh")
+_working_mode: str | None = None
+_doh_cache: dict[str, tuple[str, float]] = {}
+
+
+async def _resolve_via_doh(host: str) -> str | None:
+    """Resolve a foreign host through domestic DoH resolvers (cached)."""
+
+    cached = _doh_cache.get(host)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+    async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
+        for resolver in DOH_RESOLVERS:
+            try:
+                response = await client.get(
+                    resolver, params={"name": host, "type": "A"}
+                )
+                payload = response.json()
+            except Exception:
+                continue
+            for answer in payload.get("Answer") or []:
+                if answer.get("type") == 1 and answer.get("data"):
+                    ip = str(answer["data"])
+                    _doh_cache[host] = (ip, time.monotonic() + DOH_CACHE_TTL_SECONDS)
+                    return ip
+    return None
+
+
+def _mailto() -> str | None:
+    return os.getenv("OPENALEX_MAILTO") or None
+
+
+def clean_doi(value: str | None) -> str:
+    if not value:
+        return ""
+    doi = DOI_PREFIX_RE.sub("", value.strip())
+    return unquote(doi).lower()
 
 
 @dataclass(slots=True)
@@ -47,17 +113,6 @@ class WorkRow:
             "open_access": self.open_access,
             "source": "openalex",
         }
-
-
-def _mailto() -> str | None:
-    return os.getenv("OPENALEX_MAILTO") or None
-
-
-def clean_doi(value: str | None) -> str:
-    if not value:
-        return ""
-    doi = DOI_PREFIX_RE.sub("", value.strip())
-    return unquote(doi).lower()
 
 
 def _journal_of(work: dict) -> str | None:
@@ -104,6 +159,65 @@ def title_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, normalize_title(a), normalize_title(b)).ratio()
 
 
+async def openalex_get(params: dict) -> dict:
+    """GET an OpenAlex endpoint via env proxy, direct, or DoH+IP dialing.
+
+    Each mode is attempted twice (transient failures retry once); the first
+    mode that produces a response is cached for the process lifetime.
+    """
+
+    global _working_mode
+    # Probe the cached mode first, but always keep the other modes as fallback
+    # in case the cached one stopped working.
+    modes = tuple(
+        dict.fromkeys(((_working_mode,) if _working_mode else ()) + _CLIENT_MODES)
+    )
+    last_error: Exception | None = None
+
+    for mode in modes:
+        if mode == "doh":
+            ip = await _resolve_via_doh(OPENALEX_HOST)
+            if not ip:
+                continue
+            url = f"https://{ip}/works"
+            headers = {"Host": OPENALEX_HOST}
+            request_extensions = {"sni_hostname": OPENALEX_HOST}
+        else:
+            url = OPENALEX_API
+            headers = {}
+            request_extensions = None
+        for attempt in range(2):
+            client = httpx.AsyncClient(
+                timeout=REQUEST_TIMEOUT,
+                follow_redirects=True,
+                trust_env=(mode == "env"),
+            )
+            try:
+                response = await client.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    extensions=request_extensions,
+                )
+                response.raise_for_status()
+            except TRANSIENT_ERRORS as exc:
+                last_error = exc
+                if _working_mode == mode:
+                    _working_mode = None
+                await asyncio.sleep(0.4)
+                continue
+            except httpx.HTTPStatusError:
+                raise
+            finally:
+                await client.aclose()
+            _working_mode = mode
+            return response.json()
+
+    raise ConnectionError(
+        f"OpenAlex unreachable via proxy, direct and DoH+IP connection: {last_error!r}"
+    )
+
+
 async def search_openalex(query: str, limit: int = 12) -> list[dict]:
     """Free-text search; rows are ordered by OpenAlex relevance."""
 
@@ -118,16 +232,12 @@ async def search_openalex(query: str, limit: int = 12) -> list[dict]:
     mailto = _mailto()
     if mailto:
         params["mailto"] = mailto
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, follow_redirects=True) as client:
-        response = await client.get(OPENALEX_API, params=params)
-        response.raise_for_status()
-        payload = response.json()
+    payload = await openalex_get(params)
     rows = [row.to_dict() for row in map(parse_work, payload.get("results") or []) if row]
     return rows
 
 
 async def resolve_title(
-    client: httpx.AsyncClient,
     title: str,
     *,
     candidates: int = 4,
@@ -153,9 +263,8 @@ async def resolve_title(
         "resolved": False,
     }
     try:
-        response = await client.get(OPENALEX_API, params=params)
-        response.raise_for_status()
-        works = response.json().get("results") or []
+        payload = await openalex_get(params)
+        works = payload.get("results") or []
     except Exception as exc:
         result["error"] = repr(exc)
         return result
@@ -197,9 +306,8 @@ async def resolve_titles(titles: list[str]) -> list[dict]:
 
     cleaned = [t.strip() for t in titles if t and t.strip()]
     results: list[dict] = []
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, follow_redirects=True) as client:
-        for index, title in enumerate(cleaned):
-            if index:
-                await asyncio.sleep(0.15)
-            results.append(await resolve_title(client, title))
+    for index, title in enumerate(cleaned):
+        if index:
+            await asyncio.sleep(0.15)
+        results.append(await resolve_title(title))
     return results

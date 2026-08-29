@@ -146,27 +146,29 @@ Example A,10.1021/acs.joc.0000001
 3. 解析结果逐行显示匹配标题、DOI 与**相似度徽章**（绿色 = 高置信匹配，红色 = 相似度低于 0.72 的存疑匹配，建议人工核对）。
 4. 使用底部按钮整批操作：**下载选中（原文+SI）**、**下载选中（仅原文）**、**复制选中 DOI**。
 
-> 提示：在单条检索框输入内容后点 **转入批量解析**，可把当前关键词直接带入批量输入框。中文标题在 OpenAlex 覆盖有限，请改用 ③ 知网检索。
+> 提示：在单条检索框输入内容后点 **转批量**，可把当前关键词直接带入批量输入框。中文标题在 OpenAlex 覆盖有限，请改用 ③ 知网检索。
+
+**连接策略（自动）**：OpenAlex 请求依次尝试 ①环境代理 → ②直连 → ③国内 DoH 解析 + IP 直连（SNI 保持域名），任一通路成功即缓存复用。无论你的网络需要代理还是 DNS 受限，都无需手动配置。
 
 ### 4.3 ③ 知网检索（CNKI）
 
 ![知网检索](docs/screenshots/03-cnki-search.png)
 
-**前置条件**：已连接校园网且机构拥有知访问权限；`kns.cnki.net` 可达。
+**前置条件**：已连接校园网且机构拥有知网访问权限；`kns.cnki.net` 可达。
 
 **操作步骤**：
 
 1. 输入中文标题或关键词（如 `锂离子电池 界面改性`）。
-2. 选择超时（60/120/180 秒），点击 **🔍 检索知网**，并在确认框中确认。
-3. 程序启动一个独立的 Edge 子进程访问知网页面，约 30–120 秒后返回结果。
+2. 点击 **🔍 检索知网** 并确认。
+3. 程序弹出独立的 Edge 窗口访问知网。若出现滑块验证，先自动求解；**自动失败时请在该窗口中手动滑动滑块**，程序检测到验证通过后自动继续（默认等待 120 秒，可用 `PAPER_TOOL_CNKI_MANUAL_WAIT` 调整）。
 4. 每条结果提供 **复制 DOI** 与 **下载原文**；知网文章没有 SI，不提供 SI 按钮。
 
 说明：
 
-- 知网检索结果会尝试提取 DOI；**没有登记 DOI 的中文文章也能直接下载**——程序通过文章页直链完成 PDF/CAJ 下载。
+- 知网使用持久化浏览器配置（`downloads/_browser_profile/`），验证通过后的一段有效期内后续检索不再弹验证。
+- 检索结果会尝试提取 DOI；**没有登记 DOI 的中文文章也能直接下载**——程序通过文章页直链完成 PDF/CAJ 下载。
 - 提取到的 DOI 与中文标题会写入归档结果（`downloads/_manifests/`）。
-- 若知网弹出验证码，请先在普通浏览器完成一次验证后重试。
-- 检索与下载互不影响：检索只读页面，下载走完整的单篇子进程管线。
+- 检索与下载互不影响：检索只读页面，下载走完整的单篇子进程管线（同样有头 + 验证处理）。
 
 ### 4.4 ④ 任务与结果
 
@@ -320,6 +322,7 @@ downloads/
 | `PAPER_TOOL_CLOUDFLARE_TIMEOUT` | `30` | Cloudflare 挑战处理等待 |
 | `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER` | `1` | 是否启用 Pydoll Cloudflare 助手 |
 | `PAPER_TOOL_KILL_GRACE` | `5` | 子进程终止宽限（秒） |
+| `PAPER_TOOL_CNKI_MANUAL_WAIT` | `120` | 知网滑块验证自动失败后等待人工滑动的时间（秒） |
 
 `.env` 示例：
 
@@ -355,7 +358,9 @@ OPENALEX_MAILTO=you@example.com
 
 **Elsevier 提示 API key 相关失败**：确认启动服务的同一终端已设置 `ELSEVIER_API_KEY`（或写入 `.env`）；401/403 表示 key 无 Article Retrieval 权限。
 
-**知网检索/下载失败**：确认校园网可达知网且机构已授权；出现验证码先人工完成一次验证；无 DOI 文章请从知网检索结果点"下载原文"（走文章页直链）。
+**知网检索/下载失败**：确认校园网可达知网且机构已授权。知网的滑块验证会先自动求解；失败时会在弹出的 Edge 窗口等待人工滑动（默认 120 秒），滑动通过后自动继续。多次失败可稍等几分钟后重试，或调大 `PAPER_TOOL_CNKI_MANUAL_WAIT`。无 DOI 文章请从知网检索结果点"下载原文"（走文章页直链）。
+
+**OpenAlex 提示 ConnectError**：程序已内置"环境代理 → 直连 → DoH+IP 直连"三级自动回退。若仍失败，请确认 `api.openalex.org` 在当前网络下可达（开/关代理各试一次），并在 `.env` 配置 `OPENALEX_MAILTO` 进入 polite pool。
 
 **下载的 PDF 打不开**：查看 `_manifests/<doi>.json` 中该文件的 `error`（如 `html_instead_of_file` 表示拿到的是权限拦截页），重新提交即可增量补下。
 
@@ -429,7 +434,7 @@ The year comes from citation meta tags or the Elsevier coverDate (`unknown` if u
 
 ### Configuration
 
-All settings live in `.env` (Git-ignored): `ELSEVIER_API_KEY`, `OPENALEX_MAILTO`, `PAPER_TOOL_DOWNLOAD_ROOT`, `PAPER_TOOL_CONCURRENCY`, `PAPER_TOOL_ARTICLE_TIMEOUT`, `PAPER_TOOL_WILEY_TIMEOUT`, `PAPER_TOOL_ELSEVIER_TIMEOUT`, `PAPER_TOOL_NAV_TIMEOUT`, `PAPER_TOOL_NATIVE_TIMEOUT`, `PAPER_TOOL_BLOB_TIMEOUT`, `PAPER_TOOL_CLOUDFLARE_TIMEOUT`, `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER`, `PAPER_TOOL_KILL_GRACE`. Existing system environment variables take precedence.
+All settings live in `.env` (Git-ignored): `ELSEVIER_API_KEY`, `OPENALEX_MAILTO`, `PAPER_TOOL_DOWNLOAD_ROOT`, `PAPER_TOOL_CONCURRENCY`, `PAPER_TOOL_ARTICLE_TIMEOUT`, `PAPER_TOOL_WILEY_TIMEOUT`, `PAPER_TOOL_ELSEVIER_TIMEOUT`, `PAPER_TOOL_NAV_TIMEOUT`, `PAPER_TOOL_NATIVE_TIMEOUT`, `PAPER_TOOL_BLOB_TIMEOUT`, `PAPER_TOOL_CLOUDFLARE_TIMEOUT`, `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER`, `PAPER_TOOL_KILL_GRACE`, `PAPER_TOOL_CNKI_MANUAL_WAIT`. Existing system environment variables take precedence.
 
 ### Statuses & troubleshooting
 

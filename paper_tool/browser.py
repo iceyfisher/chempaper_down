@@ -68,11 +68,26 @@ def _kill_descendants_sync() -> None:
 class BrowserWorker:
     """One Edge instance inside one short-lived DOI subprocess."""
 
-    def __init__(self, worker_id: int, settings: Settings):
+    def __init__(
+        self,
+        worker_id: int,
+        settings: Settings,
+        *,
+        persistent_profile: bool = False,
+        headless: bool = True,
+    ):
         self.worker_id = worker_id
         self.settings = settings
         self.staging_dir = settings.download_root / "_staging" / f"doi_process_{os.getpid()}"
         self.staging_dir.mkdir(parents=True, exist_ok=True)
+        # CNKI keeps an anti-bot cookie per profile; a persistent profile lets a
+        # once-solved CAPTCHA carry over to later searches.
+        self.profile_dir = (
+            settings.download_root / "_browser_profile"
+            if persistent_profile
+            else None
+        )
+        self.headless = headless
         self._edge_context = None
         self.browser = None
         self.main_tab = None
@@ -91,7 +106,10 @@ class BrowserWorker:
     async def start(self) -> "BrowserWorker":
         self.clear_staging()
         options = ChromiumOptions()
-        options.headless = True
+        options.headless = self.headless
+        if self.profile_dir is not None:
+            self.profile_dir.mkdir(parents=True, exist_ok=True)
+            options.add_argument(f"--user-data-dir={self.profile_dir.resolve()}")
         options.set_default_download_directory(str(self.staging_dir.resolve()))
         options.prompt_for_download = False
         options.allow_automatic_downloads = True

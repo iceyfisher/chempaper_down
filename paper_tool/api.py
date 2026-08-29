@@ -250,8 +250,13 @@ async def search_cnki(q: str, timeout: int = 120):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
+    # Cover the manual slider-captcha window inside the subprocess.
+    import os as _os
+
+    manual_wait = int(_os.getenv("PAPER_TOOL_CNKI_MANUAL_WAIT", "120"))
+    wait_budget = timeout + manual_wait + 60
     try:
-        await asyncio.wait_for(process.wait(), timeout=timeout + 20)
+        await asyncio.wait_for(process.wait(), timeout=wait_budget)
     except asyncio.TimeoutError:
         try:
             process.kill()

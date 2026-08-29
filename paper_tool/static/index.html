@@ -3,9 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Paper Downloader · 论文批量下载</title>
+  <title>Paper Downloader</title>
   <style>
-    /* ============ Neo-Brutalist design tokens ============ */
     :root{
       --ink:#111111; --paper:#f4f1ea; --card:#ffffff;
       --yellow:#ffc900; --red:#ff5252; --blue:#4d9de0;
@@ -13,14 +12,12 @@
       --shadow:4px 4px 0 var(--ink); --shadow-lg:6px 6px 0 var(--ink);
     }
     *{box-sizing:border-box}
-    html{scroll-behavior:smooth}
     body{margin:0;background:var(--paper);color:var(--ink);
       font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
-      background-image:radial-gradient(rgba(17,17,17,.07) 1.2px,transparent 1.2px);
-      background-size:22px 22px;}
+      background-image:radial-gradient(rgba(17,17,17,.07) 1.2px,transparent 1.2px);background-size:22px 22px}
     main{max-width:1180px;margin:0 auto;padding:26px 18px 70px}
 
-    /* ============ Brutal primitives ============ */
+    /* ---- brutal primitives ---- */
     .b-card{position:relative;background:var(--card);border:3px solid var(--ink);
       box-shadow:var(--shadow-lg);border-radius:0;margin-bottom:22px}
     .b-card>.strip{height:10px;border-bottom:3px solid var(--ink)}
@@ -31,57 +28,52 @@
     .b-btn{display:inline-flex;align-items:center;gap:6px;border:3px solid var(--ink);
       background:var(--card);color:var(--ink);font-weight:800;font-size:13px;
       padding:9px 14px;cursor:pointer;box-shadow:var(--shadow);border-radius:0;
-      text-transform:uppercase;letter-spacing:.03em;line-height:1.2;
-      transition:box-shadow .06s ease,transform .06s ease;user-select:none}
-    .b-btn:hover:not(:disabled){background:var(--yellow)}
+      text-transform:uppercase;letter-spacing:.03em;line-height:1.2;user-select:none;
+      transition:box-shadow .1s ease,transform .1s ease,background .1s ease}
+    .b-btn:hover:not(:disabled){background:var(--yellow);transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--ink)}
     .b-btn:active:not(:disabled){box-shadow:2px 2px 0 var(--ink);transform:translate(2px,2px)}
     .b-btn:disabled{opacity:.45;cursor:not-allowed}
     .b-btn.primary{background:var(--yellow)}
-    .b-btn.primary:hover:not(:disabled){background:#ffd83d}
-    .b-btn.secondary{background:var(--card)}
     .b-btn.danger{background:var(--red);color:#fff}
     .b-btn.danger:hover:not(:disabled){background:#ff6b6b}
     .b-btn.small{padding:5px 9px;font-size:11px;border-width:2px;box-shadow:3px 3px 0 var(--ink)}
-    .b-btn.small:active:not(:disabled){box-shadow:1px 1px 0 var(--ink);transform:translate(2px,2px)}
+    .b-btn.small:active:not(:disabled){box-shadow:1px 1px 0 var(--ink)}
+    .b-btn.loading{color:transparent;pointer-events:none;position:relative}
+    .b-btn.loading::after{content:"";position:absolute;inset:0;margin:auto;width:14px;height:14px;
+      border:3px solid var(--ink);border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite}
 
-    .b-input,.b-select,textarea.b-input{width:100%;border:0;border-bottom:3px solid var(--ink);
-      border-radius:0;background:transparent;color:var(--ink);padding:9px 4px;
-      font:inherit;font-size:14px;outline:none}
-    .b-input::placeholder,textarea.b-input::placeholder{font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;
-      font-size:12.5px;color:#8f8a80}
+    .b-input,textarea.b-input{width:100%;border:0;border-bottom:3px solid var(--ink);
+      border-radius:0;background:transparent;color:var(--ink);padding:9px 4px;font:inherit;font-size:14px;outline:none}
+    .b-input::placeholder,textarea.b-input::placeholder{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;color:#8f8a80}
     .b-input:focus,textarea.b-input:focus{background:#fffdf4}
-    textarea.b-input{min-height:150px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;font-size:13px}
-    .b-select{width:auto;border:3px solid var(--ink);background:var(--card);
-      font-weight:700;padding:8px 10px;cursor:pointer;box-shadow:var(--shadow)}
-    label{display:block;font-size:12px;font-weight:800;text-transform:uppercase;
-      letter-spacing:.06em;margin:0 0 5px;color:var(--muted)}
+    textarea.b-input{min-height:140px;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:13px}
+    .b-select{width:auto;border:3px solid var(--ink);background:var(--card);font-weight:700;
+      padding:8px 10px;cursor:pointer;box-shadow:var(--shadow)}
+    label{display:block;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:0 0 5px;color:var(--muted)}
 
-    .b-badge{display:inline-block;border:2px solid var(--ink);border-radius:0;
-      text-transform:uppercase;font-size:10px;font-weight:800;letter-spacing:.05em;
-      padding:2px 7px;background:var(--card);vertical-align:middle}
+    .b-badge{display:inline-block;border:2px solid var(--ink);text-transform:uppercase;font-size:10px;
+      font-weight:800;letter-spacing:.05em;padding:2px 7px;background:var(--card);vertical-align:middle}
     .b-badge.y{background:var(--yellow)}.b-badge.b{background:var(--blue);color:#fff}
     .b-badge.r{background:var(--red);color:#fff}.b-badge.g{background:var(--green)}
     .b-badge.p{background:var(--purple);color:#fff}.b-badge.w{background:#fff}
 
-    /* ============ header / tabs ============ */
     header.hero h1{margin:0;font-size:34px;font-weight:900;letter-spacing:.5px;text-transform:uppercase}
     header.hero p{margin:8px 0 0;color:var(--muted);font-size:13px}
     .hero-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
     nav.tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 22px}
-    nav.tabs .b-btn{box-shadow:var(--shadow)}
     nav.tabs .b-btn[aria-selected="true"]{background:var(--ink);color:var(--yellow)}
+    nav.tabs .b-btn[aria-selected="true"]:hover{background:var(--ink)}
 
     .row{display:grid;gap:14px}
     .row.two{grid-template-columns:1fr 1fr}
-    .row.three{grid-template-columns:1fr 1fr 1fr}
-    .row.four{grid-template-columns:repeat(4,1fr)}
     .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .field{margin-bottom:14px}
+    .hint{font-size:12px;line-height:1.7;color:var(--muted)}
+    .hint b{color:var(--ink)}
+    .divider{border-top:3px dashed var(--ink);margin:14px 0;opacity:.35}
 
-    /* ============ stats ============ */
     .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
-    .stat{background:var(--card);border:3px solid var(--ink);box-shadow:var(--shadow);
-      padding:12px 14px;border-top:8px solid var(--ink)}
+    .stat{background:var(--card);border:3px solid var(--ink);box-shadow:var(--shadow);padding:12px 14px;border-top:8px solid var(--ink)}
     .stat:nth-child(1){border-top-color:var(--yellow)}
     .stat:nth-child(2){border-top-color:var(--green)}
     .stat:nth-child(3){border-top-color:var(--blue)}
@@ -89,114 +81,109 @@
     .stat b{display:block;font-size:24px;margin-top:2px}
     .stat span{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 
-    /* ============ search result rows ============ */
+    /* ---- search hits ---- */
     .hit{border:3px solid var(--ink);background:var(--card);box-shadow:var(--shadow);
-      padding:12px 14px;margin-bottom:14px}
+      padding:12px 14px;margin-bottom:14px;animation:fadeUp .25s ease both}
+    .hit:hover{transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--ink)}
     .hit h3{margin:0 0 6px;font-size:15px;line-height:1.45}
-    .hit .meta{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px;font-size:12px;color:var(--muted)}
-    .hit .btns{display:flex;gap:8px;flex-wrap:wrap}
     .hit .doi-code{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--paper);
       border:2px solid var(--ink);padding:1px 6px;display:inline-block;margin:2px 0 6px}
-    .checkline{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700}
+    .hit .meta{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px;font-size:12px;color:var(--muted)}
+    .hit .btns{display:flex;gap:8px;flex-wrap:wrap}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    @keyframes spin{to{transform:rotate(360deg)}}
 
-    /* ============ table ============ */
+    /* ---- table ---- */
     .table-wrap{overflow:auto;border:3px solid var(--ink);box-shadow:var(--shadow-lg);background:var(--card)}
     table{border-collapse:collapse;width:100%;min-width:960px}
     th,td{padding:9px 10px;border-bottom:2px solid var(--ink);text-align:left;font-size:12.5px;vertical-align:top}
-    th{background:var(--yellow);text-transform:uppercase;font-size:11px;letter-spacing:.05em;
-      border-bottom:3px solid var(--ink);position:sticky;top:0}
+    th{background:var(--yellow);text-transform:uppercase;font-size:11px;letter-spacing:.05em;border-bottom:3px solid var(--ink);position:sticky;top:0}
+    tbody tr{transition:background .1s ease}
     tbody tr:hover{background:#fffbe8}
     code{font-family:ui-monospace,Consolas,monospace;font-size:12px}
     .status{font-weight:800;text-transform:uppercase;font-size:11px}
     .success,.skipped_duplicate{color:#0a7f5b}.failed,.timeout,.browser_crashed,.process_error{color:#c62828}
     .partial{color:#9a6b00}.running{color:#1565c0}
 
-    /* ============ toast + modal ============ */
+    /* ---- toast + modal ---- */
     #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:60;
       display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
-    .toast-item{background:var(--ink);color:#fff;border:3px solid var(--ink);
-      box-shadow:var(--shadow);padding:9px 16px;font-size:13px;font-weight:700;max-width:80vw}
+    .toast-item{background:var(--ink);color:#fff;border:3px solid var(--ink);box-shadow:var(--shadow);
+      padding:9px 16px;font-size:13px;font-weight:700;max-width:80vw;animation:fadeUp .2s ease both}
     .toast-item.err{background:var(--red)}
 
-    .modal-overlay{position:fixed;inset:0;background:rgba(17,17,17,.55);z-index:70;
-      display:none;align-items:center;justify-content:center}
+    .modal-overlay{position:fixed;inset:0;background:rgba(17,17,17,.55);z-index:70;display:none;align-items:center;justify-content:center}
     .modal-overlay.open{display:flex}
-    .modal{background:var(--card);border:3px solid var(--ink);box-shadow:8px 8px 0 var(--ink);
-      max-width:520px;width:92vw;padding:20px}
+    .modal{background:var(--card);border:3px solid var(--ink);box-shadow:8px 8px 0 var(--ink);max-width:520px;width:92vw;padding:20px;animation:pop .15s ease both}
+    @keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
     .modal h3{margin:0 0 10px;font-size:17px;text-transform:uppercase}
     .modal p{font-size:13px;line-height:1.6;color:var(--muted);margin:0 0 16px}
 
-    .hint{font-size:12px;line-height:1.7;color:var(--muted)}
-    .hint b{color:var(--ink)}
-    .divider{border-top:3px dashed var(--ink);margin:16px 0;opacity:.35}
-    @media(max-width:860px){.row.two,.row.three,.row.four,.stats{grid-template-columns:1fr 1fr}}
-    @media(max-width:560px){.row.two,.row.three,.row.four,.stats{grid-template-columns:1fr}}
-    @media(prefers-reduced-motion:reduce){.b-btn{transition:none}}
+    @media(max-width:860px){.row.two,.stats{grid-template-columns:1fr 1fr}}
+    @media(max-width:560px){.row.two,.stats{grid-template-columns:1fr}}
+    @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
   </style>
 </head>
 <body>
 <main>
   <header class="hero">
     <h1>📄 Paper Downloader</h1>
-    <p>DOI / 文章标题 → 自动下载论文原文与补充材料（SI），支持 OpenAlex 检索与知网（CNKI）检索。</p>
+    <p>DOI / 标题 → 论文 PDF 与 SI，自动归档</p>
     <div class="hero-badges">
       <span class="b-badge y">OpenAlex</span><span class="b-badge r">知网 CNKI</span>
-      <span class="b-badge w">ACS</span><span class="b-badge w">AIP</span><span class="b-badge w">AAAS / Science</span>
+      <span class="b-badge w">ACS</span><span class="b-badge w">AIP</span><span class="b-badge w">Science</span>
       <span class="b-badge w">RSC</span><span class="b-badge w">Wiley</span><span class="b-badge w">Springer</span>
-      <span class="b-badge w">Elsevier</span><span class="b-badge g">校园网权限</span>
+      <span class="b-badge w">Elsevier</span>
     </div>
   </header>
 
   <div style="height:20px"></div>
   <nav class="tabs" role="tablist">
-    <button class="b-btn" role="tab" data-tab="tab-doi" aria-selected="true">① DOI 批量下载</button>
-    <button class="b-btn" role="tab" data-tab="tab-search" aria-selected="false">② 学术标题检索</button>
-    <button class="b-btn" role="tab" data-tab="tab-cnki" aria-selected="false">③ 知网检索</button>
-    <button class="b-btn" role="tab" data-tab="tab-jobs" aria-selected="false">④ 任务与结果</button>
+    <button class="b-btn" data-tab="tab-doi" aria-selected="true">① DOI 下载</button>
+    <button class="b-btn" data-tab="tab-search" aria-selected="false">② 标题检索</button>
+    <button class="b-btn" data-tab="tab-cnki" aria-selected="false">③ 知网</button>
+    <button class="b-btn" data-tab="tab-jobs" aria-selected="false">④ 任务</button>
   </nav>
 
-  <!-- ================= TAB 1: DOI ================= -->
+  <!-- ============ TAB 1: DOI ============ -->
   <section id="tab-doi" role="tabpanel">
     <div class="b-card">
       <div class="strip y"></div>
       <div class="body">
-        <h2 style="margin:0 0 12px;font-size:17px;text-transform:uppercase">DOI / DOI URL 批量下载</h2>
         <div class="row two">
           <div>
-            <label for="doiText">粘贴 DOI（每行一个，支持 https://doi.org/ 链接）</label>
-            <textarea id="doiText" class="b-input" placeholder="10.1021/acs.catal.6c02592&#10;https://doi.org/10.1002/adom.202400123&#10;10.1007/s11244-024-01234-5"></textarea>
+            <label for="doiText">DOI 列表（每行一个）</label>
+            <textarea id="doiText" class="b-input" placeholder="10.1021/acs.catal.6c02592&#10;https://doi.org/10.1002/adom.202400123"></textarea>
           </div>
           <div>
             <div class="field">
-              <label for="fileInput">上传清单（TXT / JSON / JSONL / CSV）</label>
+              <label for="fileInput">上传清单</label>
               <input id="fileInput" class="b-input" type="file" accept=".txt,.md,.json,.jsonl,.ndjson,.csv,.tsv">
             </div>
             <div class="field">
-              <label for="pathInput">或服务器可访问的本地清单路径</label>
-              <input id="pathInput" class="b-input" placeholder="D:\code\paper_search_agent\search_batch.json">
+              <label for="pathInput">本地清单路径</label>
+              <input id="pathInput" class="b-input" placeholder="D:\data\list.json">
             </div>
-            <div class="hint"><b>归档目录：</b>downloads/&lt;DOI&gt;_&lt;年份&gt;_&lt;期刊&gt;/<b>pdf</b> 与 <b>si</b> 两个子文件夹。已下载且校验通过的条目会自动跳过。</div>
+            <div class="hint">归档：<b>downloads/&lt;DOI&gt;_&lt;年份&gt;_&lt;期刊&gt;/pdf·si</b>，已校验自动跳过</div>
           </div>
         </div>
         <div class="divider"></div>
         <div class="actions">
-          <button id="startText" class="b-btn primary">🚀 开始批量下载</button>
-          <button id="startFile" class="b-btn">上传清单并开始</button>
-          <button id="startPath" class="b-btn">读取路径并开始</button>
-          <button id="cancelJob" class="b-btn danger" disabled>■ 取消当前 Job</button>
+          <button id="startText" class="b-btn primary">🚀 开始下载</button>
+          <button id="startFile" class="b-btn">上传清单</button>
+          <button id="startPath" class="b-btn">本地路径</button>
+          <button id="cancelJob" class="b-btn danger" disabled>■ 取消</button>
           <button id="clearText" class="b-btn secondary">清空</button>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ================= TAB 2: OpenAlex ================= -->
+  <!-- ============ TAB 2: OpenAlex ============ -->
   <section id="tab-search" role="tabpanel" hidden>
     <div class="b-card">
       <div class="strip b"></div>
       <div class="body">
-        <h2 style="margin:0 0 4px;font-size:17px;text-transform:uppercase">学术标题检索 · OpenAlex</h2>
-        <p class="hint" style="margin-top:0">输入文章标题或关键词检索 OpenAlex（免费开源学术数据库），提取 DOI。每条结果旁提供：<b>复制 DOI</b> / <b>下载原文</b> / <b>下载原文+SI</b>。</p>
         <div class="row" style="grid-template-columns:1fr auto auto auto;align-items:end">
           <div>
             <label for="searchQuery">标题 / 关键词</label>
@@ -204,12 +191,10 @@
           </div>
           <div>
             <label for="searchLimit">数量</label>
-            <select id="searchLimit" class="b-select">
-              <option>5</option><option selected>10</option><option>20</option><option>30</option>
-            </select>
+            <select id="searchLimit" class="b-select"><option>5</option><option selected>10</option><option>20</option><option>30</option></select>
           </div>
           <div style="padding-bottom:2px"><button id="doSearch" class="b-btn primary">🔍 检索</button></div>
-          <div style="padding-bottom:2px"><button id="useAsBatch" class="b-btn secondary">转入批量解析</button></div>
+          <div style="padding-bottom:2px"><button id="useAsBatch" class="b-btn">转批量</button></div>
         </div>
       </div>
     </div>
@@ -219,16 +204,14 @@
     <div class="b-card">
       <div class="strip p"></div>
       <div class="body">
-        <h2 style="margin:0 0 4px;font-size:17px;text-transform:uppercase">高通量批量标题解析</h2>
-        <p class="hint" style="margin-top:0">一行一个标题（最多 500 条），自动在 OpenAlex 上解析出最匹配的 DOI，再勾选下载。</p>
-        <label for="batchTitles">标题清单</label>
-        <textarea id="batchTitles" class="b-input" placeholder="One article title per line...&#10;每行一个文章标题"></textarea>
+        <label for="batchTitles">批量解析（每行一个标题，最多 500）</label>
+        <textarea id="batchTitles" class="b-input" placeholder="one title per line&#10;每行一个文章标题"></textarea>
         <div class="actions" style="margin-top:12px">
-          <button id="doBatchResolve" class="b-btn primary">⚙️ 批量解析 DOI</button>
-          <button id="batchDownloadSi" class="b-btn" disabled>⬇ 下载选中（原文+SI）</button>
-          <button id="batchDownloadPdf" class="b-btn" disabled>⬇ 下载选中（仅原文）</button>
-          <button id="batchCopy" class="b-btn secondary" disabled>📋 复制选中 DOI</button>
-          <span id="batchStats" class="b-badge w">未解析</span>
+          <button id="doBatchResolve" class="b-btn primary">⚙️ 解析 DOI</button>
+          <button id="batchDownloadSi" class="b-btn" disabled>⬇ 选中 +SI</button>
+          <button id="batchDownloadPdf" class="b-btn" disabled>⬇ 选中 PDF</button>
+          <button id="batchCopy" class="b-btn" disabled>📋 复制 DOI</button>
+          <span id="batchStats" class="b-badge w"></span>
         </div>
         <div class="divider"></div>
         <div id="batchResults"></div>
@@ -236,62 +219,58 @@
     </div>
   </section>
 
-  <!-- ================= TAB 3: CNKI ================= -->
+  <!-- ============ TAB 3: CNKI ============ -->
   <section id="tab-cnki" role="tabpanel" hidden>
     <div class="b-card">
       <div class="strip r"></div>
       <div class="body">
-        <h2 style="margin:0 0 4px;font-size:17px;text-transform:uppercase">知网检索 · CNKI</h2>
-        <p class="hint" style="margin-top:0">通过校园网权限在知网页面检索中文文献，提取 <b>DOI 与中文标题</b>。知网文章不含 SI，仅提供：<b>复制 DOI</b> / <b>下载原文</b>。</p>
         <div class="row" style="grid-template-columns:1fr auto auto;align-items:end">
           <div>
             <label for="cnkiQuery">中文标题 / 关键词</label>
             <input id="cnkiQuery" class="b-input" placeholder="锂离子电池 界面改性">
           </div>
           <div>
-            <label for="cnkiTimeout">超时（秒）</label>
-            <select id="cnkiTimeout" class="b-select">
-              <option>60</option><option selected>120</option><option>180</option>
-            </select>
+            <label for="cnkiTimeout">超时</label>
+            <select id="cnkiTimeout" class="b-select"><option>60</option><option selected>120</option><option>180</option></select>
           </div>
           <div style="padding-bottom:2px"><button id="doCnkiSearch" class="b-btn primary">🔍 检索知网</button></div>
         </div>
-        <div class="hint" style="margin-top:10px">⚠ 检索会启动一个独立的 Edge 子进程访问知网；请确保已连接校园网并拥有知网访问权限。</div>
+        <div class="hint" style="margin-top:10px">需校园网 · 知网无 SI · 首次可能弹滑块验证，自动失败时请在弹出窗口中手动滑动</div>
       </div>
     </div>
     <div id="cnkiResults"></div>
   </section>
 
-  <!-- ================= TAB 4: JOBS ================= -->
+  <!-- ============ TAB 4: JOBS ============ -->
   <section id="tab-jobs" role="tabpanel" hidden>
     <div class="stats">
-      <div class="stat"><span>任务总数</span><b id="sTotal">0</b></div>
-      <div class="stat"><span>已完成</span><b id="sDone">0</b></div>
-      <div class="stat"><span>运行中</span><b id="sRunning">0</b></div>
-      <div class="stat"><span>当前 Job</span><b id="sJob" style="font-size:14px">—</b></div>
+      <div class="stat"><span>总数</span><b id="sTotal">0</b></div>
+      <div class="stat"><span>完成</span><b id="sDone">0</b></div>
+      <div class="stat"><span>运行</span><b id="sRunning">0</b></div>
+      <div class="stat"><span>Job</span><b id="sJob" style="font-size:14px">—</b></div>
     </div>
 
     <div class="b-card">
       <div class="strip g"></div>
       <div class="body">
         <div class="actions" style="justify-content:space-between">
-          <h2 style="margin:0;font-size:16px;text-transform:uppercase">下载结果</h2>
+          <div class="hint" style="margin:0">
+            <span class="b-badge g">success</span> 全部 · <span class="b-badge y">partial</span> 部分 ·
+            <span class="b-badge b">skipped</span> 已有 · <span class="b-badge r">failed</span> 失败（见 _logs）
+          </div>
           <div class="row" style="grid-template-columns:auto auto;gap:8px;align-items:end">
             <div><label for="concurrency">并发</label>
               <select id="concurrency" class="b-select"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
-            <div><label for="timeout">硬超时(秒)</label>
+            <div><label for="timeout">超时(秒)</label>
               <select id="timeout" class="b-select"><option value="180" selected>180</option><option value="210">210</option><option value="240">240</option></select></div>
           </div>
         </div>
-        <div class="hint" style="margin-top:8px">状态含义：<span class="b-badge g">success</span> 全部完成 ·
-          <span class="b-badge y">partial</span> 部分完成 · <span class="b-badge b">skipped</span> 已存在跳过 ·
-          <span class="b-badge r">failed</span> 失败（查看 downloads/_logs 日志）</div>
       </div>
     </div>
 
     <div class="table-wrap">
       <table>
-        <thead><tr><th>DOI</th><th>状态</th><th>来源</th><th>期刊</th><th>年份</th><th>正文</th><th>SI</th><th>耗时</th><th>信息</th></tr></thead>
+        <thead><tr><th>DOI</th><th>状态</th><th>来源</th><th>期刊</th><th>年份</th><th>PDF</th><th>SI</th><th>耗时</th><th>信息</th></tr></thead>
         <tbody id="results"></tbody>
       </table>
     </div>
@@ -302,10 +281,10 @@
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal" role="dialog" aria-modal="true">
       <span class="b-badge y">CONFIRM</span>
-      <h3 id="modalTitle">确认下载</h3>
+      <h3 id="modalTitle">确认</h3>
       <p id="modalBody">…</p>
       <div class="actions" style="justify-content:flex-end">
-        <button id="modalCancel" class="b-btn secondary">取消</button>
+        <button id="modalCancel" class="b-btn">取消</button>
         <button id="modalOk" class="b-btn primary">确定</button>
       </div>
     </div>
@@ -318,10 +297,18 @@ let pollTimer=null,currentJob=null;
 
 /* ---------- primitives ---------- */
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function toast(t,err){const box=$('#toast'),el=document.createElement('div');el.className='toast-item'+(err?' err':'');el.textContent=t;box.appendChild(el);setTimeout(()=>el.remove(),err?5200:3200)}
-async function jsonFetch(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok)throw new Error(d.detail||r.statusText);return d}
-async function copyText(t){try{await navigator.clipboard.writeText(t);toast('已复制：'+t.slice(0,60)+(t.length>60?'…':''))}catch{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('已复制')}}
-function confirmModal(title,body){return new Promise(res=>{$('#modalTitle').textContent=title;$('#modalBody').textContent=body;$('#modalOverlay').classList.add('open');
+function toast(t,err){const el=document.createElement('div');el.className='toast-item'+(err?' err':'');el.textContent=t;
+  $('#toast').appendChild(el);setTimeout(()=>el.remove(),err?5200:3200)}
+async function jsonFetch(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}
+  if(!r.ok)throw new Error(d.detail||r.statusText);return d}
+function setLoading(btn,on){if(!btn)return;btn.classList.toggle('loading',on);btn.disabled=on||btn.dataset.lock==='1'}
+async function copyText(t,btn){
+  try{await navigator.clipboard.writeText(t)}
+  catch{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove()}
+  if(btn){const old=btn.textContent;btn.textContent='✓';setTimeout(()=>btn.textContent=old,1200)}
+  else toast('已复制')}
+function confirmModal(title,body){return new Promise(res=>{$('#modalTitle').textContent=title;$('#modalBody').textContent=body;
+  $('#modalOverlay').classList.add('open');
   const done=v=>{$('#modalOverlay').classList.remove('open');$('#modalOk').onclick=$('#modalCancel').onclick=null;res(v)};
   $('#modalOk').onclick=()=>done(true);$('#modalCancel').onclick=()=>done(false)})}
 function params(){return{max_concurrency:Number($('#concurrency').value),article_timeout_seconds:Number($('#timeout').value)}}
@@ -330,153 +317,198 @@ function params(){return{max_concurrency:Number($('#concurrency').value),article
 $$('nav.tabs .b-btn').forEach(btn=>btn.addEventListener('click',()=>{
   $$('nav.tabs .b-btn').forEach(b=>b.setAttribute('aria-selected',b===btn));
   ['tab-doi','tab-search','tab-cnki','tab-jobs'].forEach(id=>$('#'+id).hidden=(id!==btn.dataset.tab));
+  const focusMap={'tab-doi':'#doiText','tab-search':'#searchQuery','tab-cnki':'#cnkiQuery'};
+  if(focusMap[btn.dataset.tab])$(focusMap[btn.dataset.tab]).focus();
 }));
+function switchTab(id){$$('nav.tabs .b-btn').forEach(b=>{const on=b.dataset.tab===id;
+  b.setAttribute('aria-selected',on);$('#'+b.dataset.tab).hidden=!on})}
 
-/* ---------- DOI tab ---------- */
-async function submitText(){
-  const text=$('#doiText').value.trim();
-  if(!text){toast('请先粘贴 DOI。',true);return}
-  try{const d=await jsonFetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({doi_text:text,...params()})});beginPolling(d.job_id)}
-  catch(e){toast(e.message,true)}
-}
-async function submitFile(){
-  const f=$('#fileInput').files[0];
-  if(!f){toast('请选择清单文件。',true);return}
-  const p=params(),form=new FormData();form.append('file',f);
-  const qs=new URLSearchParams({max_concurrency:p.max_concurrency,article_timeout_seconds:p.article_timeout_seconds,doi_field:'doi'});
-  try{beginPolling((await jsonFetch('/api/jobs/upload?'+qs,{method:'POST',body:form})).job_id)}
-  catch(e){toast(e.message,true)}
-}
-async function submitPath(){
-  const input_path=$('#pathInput').value.trim();
-  if(!input_path){toast('请输入清单路径。',true);return}
-  try{beginPolling((await jsonFetch('/api/jobs/path',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({input_path,doi_field:'doi',...params()})})).job_id)}
-  catch(e){toast(e.message,true)}
-}
-async function cancelCurrent(){if(!currentJob)return;
-  try{await jsonFetch('/api/jobs/'+currentJob+'/cancel',{method:'POST'});toast('已请求取消，活动子进程及 Edge 将被终止。')}
-  catch(e){toast(e.message,true)}}
+/* ---------- OpenAlex (server first, browser-direct fallback) ---------- */
+const OA_API='https://api.openalex.org/works';
+const OA_SELECT='id,doi,title,display_name,publication_year,primary_location,cited_by_count,open_access,authorships';
+function cleanDoi(v){return (v||'').replace(/^https?:\/\/(dx\.)?doi\.org\//i,'').toLowerCase()}
+function normTitle(s){return (s||'').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g,' ').trim()}
+function similarity(a,b){const A=normTitle(a),B=normTitle(b);if(A===B)return 1;
+  if(A.length<2||B.length<2)return 0;
+  const g=s=>{const m=new Map();for(let i=0;i<s.length-1;i++){const k=s.slice(i,i+2);m.set(k,(m.get(k)||0)+1)}return m};
+  const ga=g(A),gb=g(B);let inter=0;let ta=0,tb=0;
+  for(const v of ga.values())ta+=v;for(const v of gb.values())tb+=v;
+  for(const[k,v]of ga){if(gb.has(k))inter+=Math.min(v,gb.get(k))}
+  return 2*inter/(ta+tb)}
+function mapWork(w){const loc=(w.primary_location||{}).source||{};
+  return{title:w.display_name||w.title||'',doi:cleanDoi(w.doi),
+    year:w.publication_year?String(w.publication_year):null,journal:loc.display_name||null,
+    authors:((w.authorships||[]).slice(0,4).map(a=>(a.author||{}).display_name).filter(Boolean)),
+    cited_by_count:w.cited_by_count||0,open_access:!!((w.open_access||{}).is_oa)}}
+async function oaDirect(params){const r=await fetch(OA_API+'?'+new URLSearchParams(params));
+  if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}
 
-/* ---------- job polling ---------- */
-function beginPolling(id){currentJob=id;$('#sJob').textContent=id;$('#cancelJob').disabled=false;
-  switchTab('tab-jobs');toast('任务已启动 · Job '+id);
-  if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,2500)}
-function switchTab(id){$$('nav.tabs .b-btn').forEach(b=>{const on=b.dataset.tab===id;b.setAttribute('aria-selected',on);$('#'+b.dataset.tab).hidden=!on})}
-async function refresh(){if(!currentJob)return;
-  try{const j=await jsonFetch('/api/jobs/'+currentJob);
-    $('#sTotal').textContent=j.total;$('#sDone').textContent=j.completed;$('#sRunning').textContent=j.running;
-    render(j.results||[]);
-    if(['completed','failed','cancelled'].includes(j.status)){clearInterval(pollTimer);pollTimer=null;$('#cancelJob').disabled=true;
-      toast('Job '+j.id+' 结束：'+j.status)}}
-  catch(e){toast('读取状态失败：'+e.message,true)}}
-function render(items){$('#results').innerHTML=items.map(x=>{
-  const paper=x.paper?.valid?'✓':(x.paper?'✗':'—'),si=`${x.si_successful??0}/${x.si_detected??0}`;
-  return `<tr><td><code>${esc(x.doi)}</code></td><td class="status ${esc(x.status)}">${esc(x.status)}</td>
-  <td>${esc(x.publisher||'—')}</td><td>${esc(x.journal||'—')}</td><td>${esc(x.year||'—')}</td>
-  <td>${paper}</td><td>${si}</td><td>${x.elapsed_seconds==null?'—':esc(x.elapsed_seconds)+'s'}</td>
-  <td>${esc(x.message||'')}</td></tr>`}).join('')}
+async function doSearch(btn){
+  const q=$('#searchQuery').value.trim();
+  if(!q){toast('请输入检索内容',true);return}
+  setLoading(btn,true);$('#searchResults').innerHTML='';
+  let rows=null;
+  try{rows=(await jsonFetch(`/api/search/academic?q=${encodeURIComponent(q)}&limit=${$('#searchLimit').value}`)).rows}
+  catch(e){
+    try{const d=await oaDirect({search:q,'per-page':$('#searchLimit').value,select:OA_SELECT});
+      rows=(d.results||[]).map(mapWork);toast('服务检索不可达，已改用浏览器直连')}
+    catch(e2){toast('检索失败：'+e.message,true)}}
+  $('#searchResults').innerHTML=rows&&rows.length?rows.map(r=>hitCard(r)).join('')
+    :(rows?'<p class="hint">无结果</p>':'');
+  setLoading(btn,false)}
 
-/* ---------- OpenAlex search ---------- */
-function hitCard(row,siBtn=true){
+/* ---------- hit cards ---------- */
+function hitCard(row){
   const doi=row.doi||'';
+  const sim=row.similarity!=null?`<span class="b-badge ${row.resolved?'g':'r'}">相似 ${esc(row.similarity)}</span>`:'';
   return `<div class="hit" data-doi="${esc(doi)}" data-url="" data-title="${esc(row.title||'')}">
     <h3>${esc(row.title||'(无标题)')}</h3>
-    <div class="doi-code">${doi?esc(doi):'<i>无 DOI</i>'}</div>
+    ${doi?`<div class="doi-code">${esc(doi)}</div>`:'<div class="doi-code"><i>无 DOI</i></div>'}
     <div class="meta">
-      <span class="b-badge b">${esc(row.year||'年份?')}</span>
+      <span class="b-badge b">${esc(row.year||'?')}</span>
       ${row.journal?`<span class="b-badge w">${esc(row.journal)}</span>`:''}
-      <span class="b-badge y">被引 ${esc(row.cited_by_count??0)}</span>
-      ${row.open_access?'<span class="b-badge g">OA</span>':''}
-      ${row.similarity!=null?`<span class="b-badge ${row.resolved?'g':'r'}">相似度 ${esc(row.similarity)}</span>`:''}
-      ${row.authors&&row.authors.length?`<span>${esc(row.authors.slice(0,4).join(', '))}</span>`:''}
+      ${row.cited_by_count!=null?`<span class="b-badge y">引用 ${esc(row.cited_by_count)}</span>`:''}
+      ${row.open_access?'<span class="b-badge g">OA</span>':''}${sim}
+      ${row.snippet?`<span>${esc(row.snippet.slice(0,80))}…</span>`:(row.authors&&row.authors.length?`<span>${esc(row.authors.slice(0,3).join(', '))}</span>`:'')}
     </div>
     <div class="btns">
-      <button class="b-btn small secondary" onclick='copyText(${JSON.stringify(doi)})'>📋 复制 DOI</button>
-      <button class="b-btn small primary" ${doi?'':'disabled'} onclick='downloadRow(this,false)'>⬇ 下载原文</button>
-      ${siBtn?`<button class="b-btn small" ${doi?'':'disabled'} onclick='downloadRow(this,true)'>🧪 下载原文+SI</button>`:'<span class="b-badge p">知网无 SI</span>'}
+      <button class="b-btn small" data-act="copy" ${doi?'':'disabled'}>复制 DOI</button>
+      <button class="b-btn small primary" data-act="pdf" ${doi?'':'disabled'}>下载 PDF</button>
+      <button class="b-btn small" data-act="si" ${doi?'':'disabled'}>PDF+SI</button>
     </div></div>`}
-async function doSearch(){
-  const q=$('#searchQuery').value.trim();
-  if(!q){toast('请输入检索内容。',true);return}
-  $('#doSearch').disabled=true;$('#searchResults').innerHTML='<p class="hint">检索中…</p>';
-  try{const d=await jsonFetch(`/api/search/academic?q=${encodeURIComponent(q)}&limit=${$('#searchLimit').value}`);
-    $('#searchResults').innerHTML=d.rows.length
-      ? d.rows.map(r=>hitCard(r)).join('') : '<p class="hint">OpenAlex 没有返回结果。</p>'}
-  catch(e){$('#searchResults').innerHTML='';toast('检索失败：'+e.message,true)}
-  finally{$('#doSearch').disabled=false}}
-function rowFromCard(card,si){
-  return {doi:card.dataset.doi,title_query:card.dataset.title||null,article_url:card.dataset.url||null,download_si:si}}
-async function downloadRow(btn,si){
-  const card=btn.closest('.hit');
-  await downloadItems([rowFromCard(card,si)],si)}
+document.addEventListener('click',async e=>{
+  const btn=e.target.closest('.hit .b-btn');if(!btn)return;
+  const card=btn.closest('.hit'),act=btn.dataset.act;
+  if(act==='copy')return copyText(card.dataset.doi,btn);
+  await downloadItems([{doi:card.dataset.doi,title_query:card.dataset.title||null,article_url:null,
+    download_si:act==='si'}],act==='si')});
+function rowFromCard(card,si){return{doi:card.dataset.doi,title_query:card.dataset.title||null,
+  article_url:card.dataset.url||null,download_si:si}}
 async function downloadItems(items,si){
-  const ok=await confirmModal(si?'下载原文 + SI':'仅下载原文',
-    `将提交 ${items.length} 个下载任务（${si?'含补充材料 SI':'不含 SI'}），通过校园网在独立浏览器子进程中完成。`);
+  const ok=await confirmModal(si?'下载 PDF + SI':'下载 PDF',`提交 ${items.length} 个下载任务（${si?'含 SI':'不含 SI'}）`);
   if(!ok)return;
-  try{const d=await jsonFetch('/api/jobs/items',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({items,...params()})});beginPolling(d.job_id)}
+  try{beginPolling((await jsonFetch('/api/jobs/items',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items,...params()})})).job_id)}
   catch(e){toast(e.message,true)}}
 
 /* ---------- batch title resolution ---------- */
 let batchRows=[];
-async function doBatchResolve(){
+async function doBatchResolve(btn){
   const titles=$('#batchTitles').value.split('\n').map(x=>x.trim()).filter(Boolean);
-  if(!titles.length){toast('请先粘贴标题清单（每行一个）。',true);return}
-  const ok=await confirmModal('批量解析',`将对 ${titles.length} 个标题逐条请求 OpenAlex 解析 DOI（约 ${Math.ceil(titles.length*0.2)} 秒）。`);
+  if(!titles.length){toast('请先粘贴标题列表',true);return}
+  const ok=await confirmModal('批量解析',`对 ${titles.length} 个标题解析 DOI`);
   if(!ok)return;
-  $('#doBatchResolve').disabled=true;$('#batchStats').textContent='解析中…';
-  try{const d=await jsonFetch('/api/search/academic/batch',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({titles})});
-    batchRows=d.rows;
-    $('#batchResults').innerHTML=d.rows.map(r=>hitCard(r)).join('');
-    $('#batchStats').textContent=`解析 ${d.resolved}/${d.requested}`;
-    const has=d.rows.some(r=>r.doi);
-    $('#batchDownloadSi').disabled=!has;$('#batchDownloadPdf').disabled=!has;$('#batchCopy').disabled=!has;
-    toast(`批量解析完成：${d.resolved}/${d.requested} 条匹配到 DOI`)}
+  setLoading(btn,true);$('#batchStats').textContent='解析中…';
+  try{
+    try{batchRows=(await jsonFetch('/api/search/academic/batch',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({titles})})).rows}
+    catch(e){
+      // browser-direct fallback loop (150ms spacing, polite pool)
+      batchRows=[];
+      for(let i=0;i<titles.length;i++){
+        if(i)await new Promise(r=>setTimeout(r,150));
+        const row={query:titles[i],doi:null,matched_title:null,year:null,journal:null,similarity:0,resolved:false};
+        try{const d=await oaDirect({filter:'title.search:'+titles[i],'per-page':4,select:OA_SELECT});
+          let best=null,score=0;
+          for(const w of (d.results||[])){const m=mapWork(w);const s=similarity(titles[i],m.title);
+            if(s>score){best=m;score=s}}
+          if(best){Object.assign(row,{doi:best.doi,matched_title:best.title,year:best.year,
+            journal:best.journal,similarity:Math.round(score*1000)/1000,resolved:score>=0.72})}
+        }catch(_){row.error='direct_failed'}
+        batchRows.push(row)}
+      toast('服务检索不可达，已改用浏览器直连')}
+    const resolved=batchRows.filter(r=>r.doi).length;
+    $('#batchResults').innerHTML=batchRows.map(r=>hitCard(r)).join('');
+    $('#batchStats').textContent=`${resolved}/${batchRows.length}`;
+    const has=resolved>0;
+    ['batchDownloadSi','batchDownloadPdf','batchCopy'].forEach(id=>$('#'+id).disabled=!has);
+    toast(`解析完成：${resolved}/${batchRows.length} 匹配到 DOI`)}
   catch(e){$('#batchStats').textContent='失败';toast('批量解析失败：'+e.message,true)}
-  finally{$('#doBatchResolve').disabled=false}}
+  finally{setLoading(btn,false)}}
 async function batchDownload(si){
-  const items=batchRows.filter(r=>r.doi).map(r=>({doi:r.doi,title_query:r.query,article_url:null,download_si:si}));
-  if(!items.length){toast('没有已解析出 DOI 的条目。',true);return}
+  const items=batchRows.filter(r=>r.doi).map(r=>({doi:r.doi,title_query:r.query,download_si:si}));
+  if(!items.length)return toast('没有已解析的 DOI',true);
   await downloadItems(items,si)}
-async function batchCopyDoi(){
-  const dois=batchRows.filter(r=>r.doi).map(r=>r.doi);
-  if(!dois.length){toast('没有已解析出 DOI 的条目。',true);return}
-  await copyText(dois.join('\n'))}
 
-/* ---------- CNKI search ---------- */
-async function doCnkiSearch(){
+/* ---------- DOI tab ---------- */
+async function submitText(btn){
+  const text=$('#doiText').value.trim();
+  if(!text){toast('请先粘贴 DOI',true);return}
+  setLoading(btn,true);
+  try{beginPolling((await jsonFetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({doi_text:text,...params()})})).job_id)}
+  catch(e){toast(e.message,true)}
+  finally{setLoading(btn,false)}}
+async function submitFile(btn){
+  const f=$('#fileInput').files[0];
+  if(!f){toast('请选择清单文件',true);return}
+  const p=params(),form=new FormData();form.append('file',f);
+  const qs=new URLSearchParams({max_concurrency:p.max_concurrency,article_timeout_seconds:p.article_timeout_seconds,doi_field:'doi'});
+  setLoading(btn,true);
+  try{beginPolling((await jsonFetch('/api/jobs/upload?'+qs,{method:'POST',body:form})).job_id)}
+  catch(e){toast(e.message,true)}
+  finally{setLoading(btn,false)}}
+async function submitPath(btn){
+  const input_path=$('#pathInput').value.trim();
+  if(!input_path){toast('请输入清单路径',true);return}
+  setLoading(btn,true);
+  try{beginPolling((await jsonFetch('/api/jobs/path',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({input_path,doi_field:'doi',...params()})})).job_id)}
+  catch(e){toast(e.message,true)}
+  finally{setLoading(btn,false)}}
+async function cancelCurrent(){if(!currentJob)return;
+  try{await jsonFetch('/api/jobs/'+currentJob+'/cancel',{method:'POST'});toast('已请求取消')}
+  catch(e){toast(e.message,true)}}
+
+/* ---------- CNKI ---------- */
+async function doCnkiSearch(btn){
   const q=$('#cnkiQuery').value.trim();
-  if(!q){toast('请输入中文标题或关键词。',true);return}
-  const ok=await confirmModal('知网检索','将启动独立 Edge 子进程访问知网（需校园网权限），约需 30–120 秒。');
+  if(!q){toast('请输入检索内容',true);return}
+  const ok=await confirmModal('知网检索','启动 Edge 窗口访问知网；如出现滑块验证需手动滑动');
   if(!ok)return;
-  $('#doCnkiSearch').disabled=true;$('#cnkiResults').innerHTML='<p class="hint">知网检索中，浏览器子进程运行里…</p>';
+  setLoading(btn,true);$('#cnkiResults').innerHTML='<p class="hint">检索中…</p>';
   try{const d=await jsonFetch(`/api/search/cnki?q=${encodeURIComponent(q)}&timeout=${$('#cnkiTimeout').value}`);
     $('#cnkiResults').innerHTML=d.rows.length
-      ? d.rows.map(r=>hitCard({...r,journal:r.snippet?undefined:null,authors:[r.snippet||''],cited_by_count:null,open_access:false})).join('')
-      : '<p class="hint">知网没有返回可识别的结果（可能需要验证或登录）。</p>'}
+      ?d.rows.map(r=>hitCard({title:r.title,doi:r.doi,year:r.year,snippet:r.snippet})).join('')
+      :'<p class="hint">无可识别结果（可能需要验证或登录）</p>'}
   catch(e){$('#cnkiResults').innerHTML='';toast('知网检索失败：'+e.message,true)}
-  finally{$('#doCnkiSearch').disabled=false}}
+  finally{setLoading(btn,false)}}
+
+/* ---------- job polling ---------- */
+function beginPolling(id){currentJob=id;$('#sJob').textContent=id;$('#cancelJob').disabled=false;
+  switchTab('tab-jobs');toast('任务已启动 · '+id);
+  if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,2500)}
+async function refresh(){if(!currentJob)return;
+  try{const j=await jsonFetch('/api/jobs/'+currentJob);
+    $('#sTotal').textContent=j.total;$('#sDone').textContent=j.completed;$('#sRunning').textContent=j.running;
+    render(j.results||[]);
+    if(['completed','failed','cancelled'].includes(j.status)){
+      clearInterval(pollTimer);pollTimer=null;$('#cancelJob').disabled=true;toast('Job 结束：'+j.status)}}
+  catch(e){toast('读取状态失败：'+e.message,true)}}
+function render(items){$('#results').innerHTML=items.map(x=>{
+  const pdf=x.paper?.valid?'✓':(x.paper?'✗':'—'),si=`${x.si_successful??0}/${x.si_detected??0}`;
+  return `<tr><td><code>${esc(x.doi)}</code></td><td class="status ${esc(x.status)}">${esc(x.status)}</td>
+  <td>${esc(x.publisher||'—')}</td><td>${esc(x.journal||'—')}</td><td>${esc(x.year||'—')}</td>
+  <td>${pdf}</td><td>${si}</td><td>${x.elapsed_seconds==null?'—':esc(x.elapsed_seconds)+'s'}</td>
+  <td>${esc(x.message||'')}</td></tr>`}).join('')}
 
 /* ---------- wire up ---------- */
-$('#startText').addEventListener('click',submitText);
-$('#startFile').addEventListener('click',submitFile);
-$('#startPath').addEventListener('click',submitPath);
+$('#startText').addEventListener('click',e=>submitText(e.currentTarget));
+$('#startFile').addEventListener('click',e=>submitFile(e.currentTarget));
+$('#startPath').addEventListener('click',e=>submitPath(e.currentTarget));
 $('#cancelJob').addEventListener('click',cancelCurrent);
-$('#clearText').addEventListener('click',()=>{$('#doiText').value='';$('#doiText').focus();toast('已清空。')});
-$('#doSearch').addEventListener('click',doSearch);
-$('#searchQuery').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
+$('#clearText').addEventListener('click',()=>{$('#doiText').value='';$('#doiText').focus()});
+$('#doSearch').addEventListener('click',e=>doSearch(e.currentTarget));
+$('#searchQuery').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch($('#doSearch'))});
 $('#useAsBatch').addEventListener('click',()=>{
   const q=$('#searchQuery').value.trim();
-  if(!q){toast('请先输入检索内容。',true);return}
-  $('#batchTitles').value=q;switchTab('tab-search');toast('已转入批量解析输入框。')});
-$('#doBatchResolve').addEventListener('click',doBatchResolve);
+  if(!q)return toast('请先输入检索内容',true);
+  $('#batchTitles').value=q;$('#batchTitles').focus()});
+$('#doBatchResolve').addEventListener('click',e=>doBatchResolve(e.currentTarget));
 $('#batchDownloadSi').addEventListener('click',()=>batchDownload(true));
 $('#batchDownloadPdf').addEventListener('click',()=>batchDownload(false));
-$('#batchCopy').addEventListener('click',batchCopyDoi);
-$('#doCnkiSearch').addEventListener('click',doCnkiSearch);
+$('#batchCopy').addEventListener('click',()=>copyText(batchRows.filter(r=>r.doi).map(r=>r.doi).join('\n')));
+$('#doCnkiSearch').addEventListener('click',e=>doCnkiSearch(e.currentTarget));
 </script>
 </body>
 </html>

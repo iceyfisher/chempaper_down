@@ -2,50 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import re
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import urljoin
 
 from .base import AdapterContext, PublisherAdapter
+from ..cnki_search import search_on_tab
 from ..download import click_element_and_wait, native_navigation_download
 from ..models import ArticleResult
 from ..resources import infer_extension
 from ..storage import doi_to_filename
 
-
-CNKI_SEARCH_URL = "https://kns.cnki.net/kns8s/defaultresult/index?dbcode=CJFQ&korder=SU&kw={query}"
-CNKI_FALLBACK_SEARCH_URL = "https://search.cnki.com.cn/Search/Result?content={query}"
-
-# Anchors pointing at real article detail pages on any CNKI host.
-ARTICLE_LINK_PATTERNS = (
-    "/kcms2/article/",
-    "kcms/detail/detail.aspx",
-    "KXReader/Detail",
-    "mall.cnki.net/magazine/Article/",
-)
-
-RESULT_DISCOVERY_JS = r"""
-(() => {
-  const patterns = [
-    /\/kcms2\/article\//,
-    /kcms\/detail\/detail\.aspx/,
-    /KXReader\/Detail/,
-    /mall\.cnki\.net\/magazine\/Article\//
-  ];
-  const records = [];
-  const seen = new Set();
-  for (const a of document.querySelectorAll('a[href]')) {
-    const href = a.href || '';
-    if (!patterns.some(p => p.test(href)) || seen.has(href)) continue;
-    seen.add(href);
-    const row = a.closest('tr, li, div');
-    records.push({
-      url: href,
-      text: (a.textContent || '').replace(/\s+/g, ' ').trim(),
-      rowText: row ? (row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500) : ''
-    });
-  }
-  return { records: records };
-})()
-"""
 
 ARTICLE_METADATA_JS = r"""
 (() => {
@@ -164,30 +129,38 @@ class CnkiAdapter(PublisherAdapter):
     async def _open_article(self, ctx: AdapterContext) -> str:
         tab = ctx.tab
         if ctx.article_url_hint:
-            return await self._navigate(ctx, ctx.article_url_hint)
+            url = await self._navigate(ctx, ctx.article_url_hint)
+            from ..cnki_search import _handle_captcha_if_present
+
+            await _handle_captcha_if_present(tab)
+            return url
 
         query = ctx.title_query or ctx.doi
-        for template in (CNKI_SEARCH_URL, CNKI_FALLBACK_SEARCH_URL):
-            url = template.format(query=quote_plus(query))
-            current = await self._navigate(ctx, url)
-            await asyncio.sleep(1.5)
-            try:
-                raw = await asyncio.wait_for(
-                    tab.execute_script(RESULT_DISCOVERY_JS, return_by_value=True),
-                    timeout=10,
-                )
-            except Exception as exc:
-                if self.is_browser_disconnect(exc):
-                    raise
-                raw = None
-            records = (_unwrap(raw) or {}).get("records") or []
-            if records:
-                ctx.navigation_diagnostics["cnki_search_source"] = template.split("?")[0]
-                ctx.navigation_diagnostics["cnki_search_hits"] = len(records)
-                return await self._navigate(ctx, urljoin(current, records[0]["url"]))
-        raise RuntimeError(
-            f"CNKI search returned no article page for query: {query!r}"
+        rows, attempts = await search_on_tab(
+            tab, query, ctx.settings, ctx.settings.settle_seconds
         )
+        ctx.navigation_diagnostics["cnki_search_attempts"] = attempts
+        if rows:
+            ctx.navigation_diagnostics["cnki_search_source"] = rows[0].get("url")
+            url = await self._navigate(ctx, urljoin(await self._current_url(tab), rows[0]["url"]))
+            from ..cnki_search import _handle_captcha_if_present
+
+            await _handle_captcha_if_present(tab)
+            return url
+
+        detail = "; ".join(
+            f"{a.get('url')}: {a.get('records', 0)} hits, page={a.get('page_title', '')!r}"
+            for a in attempts
+        )
+        raise RuntimeError(
+            f"CNKI search returned no article page for query {query!r} ({detail})"
+        )
+
+    async def _current_url(self, tab) -> str:
+        try:
+            return await asyncio.wait_for(tab.current_url, timeout=3)
+        except Exception:
+            return ""
 
     async def _navigate(self, ctx: AdapterContext, url: str) -> str:
         tab = ctx.tab
