@@ -33,6 +33,50 @@ ARTICLE_METADATA_JS = r"""
 })()
 """
 
+# Enumerates every visible download entry (栏目) on a CNKI article page and
+# ranks them: explicit PDF buttons first, CAJ next, generic download links
+# and HTML-reading entries last. The Python side clicks them in this order.
+DOWNLOAD_SCAN_JS = r"""
+(() => {
+  const entries = [];
+  const seen = new Set();
+  const classify = (el) => {
+    const id = (el.id || '').toLowerCase();
+    const cls = (el.className || '').toString().toLowerCase();
+    const title = (el.title || el.getAttribute('title') || '').toLowerCase();
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 30).toLowerCase();
+    const href = (el.getAttribute('href') || '').toLowerCase();
+    const bag = id + ' ' + cls + ' ' + title + ' ' + text + ' ' + href;
+    if (/pdfdown|btn-dlpdf|dl-pdf|download\?dflag\=pdf|pdfdown/.test(bag)) return 100;
+    if (/^pdf$/.test(text) || /^pdf下载$/.test(text) || title === 'pdf下载') return 92;
+    if (/cajdown|btn-dlcaj|dl-caj/.test(bag)) return 72;
+    if (/^caj$/.test(text) || /^caj下载$/.test(text)) return 64;
+    if (href.indexOf('download') >= 0) return 44;
+    if (/下载/.test(text) && /全文|正文/.test(text)) return 40;
+    if (/html阅读|^html$/.test(text)) return 22;
+    return -1;
+  };
+  document.querySelectorAll('a, button, [role="button"]').forEach(el => {
+    if (!el.getClientRects().length && el.offsetParent === null) return;
+    const score = classify(el);
+    if (score < 20) return;
+    const href = el.getAttribute('href') || '';
+    const key = (el.id || '') + '|' + (el.className || '') + '|' + href + '|' + score;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({
+      score: score,
+      id: el.id || null,
+      cls: (el.className || '').toString().trim().slice(0, 60) || null,
+      text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 30) || null,
+      href: href.slice(0, 200) || null
+    });
+  });
+  entries.sort((a, b) => b.score - a.score);
+  return { entries: entries.slice(0, 10) };
+})()
+"""
+
 
 def _unwrap(value):
     if not isinstance(value, dict):
@@ -196,40 +240,84 @@ class CnkiAdapter(PublisherAdapter):
         return match.group(0) if match else None
 
     async def _download_pdf(self, ctx: AdapterContext, target):
+        """Scan the article page DOM for every download entry (栏目) and try
+        them in priority order.
+
+        CNKI renders different download entries per content type (journal
+        article / thesis / conference): PDF buttons (#pdfDown, .btn-dlpdf),
+        CAJ buttons, generic /download links. Instead of a fixed selector
+        list, we enumerate all visible anchors/buttons whose id, class,
+        title, text or href matches download patterns, score them (explicit
+        PDF entries first, CAJ next, generic download links last), then click
+        each candidate — falling back to navigating its href when the click
+        yields no file. The scan inventory and the winning entry are recorded
+        in the navigation diagnostics.
+        """
+
         tab = ctx.tab
-        selectors = (
-            "a#pdfDown",
-            "a.btn-dlpdf",
-            'a[href*="/kcms2/article/download"]',
-            'a[href*="/article/download"]',
-            'a[title*="PDF"]',
-            "a#cajDown",
-        )
-        for selector in selectors:
-            element = await tab.query(selector, timeout=3, raise_exc=False)
-            if not element:
+        timeout = min(ctx.settings.native_download_timeout_seconds, 60)
+
+        try:
+            raw = await asyncio.wait_for(
+                tab.execute_script(DOWNLOAD_SCAN_JS, return_by_value=True),
+                timeout=10,
+            )
+        except Exception as exc:
+            if self.is_browser_disconnect(exc):
+                raise
+            raw = None
+        entries = (_unwrap(raw) or {}).get("entries") or []
+        ctx.navigation_diagnostics["cnki_download_entries"] = entries
+
+        for index, entry in enumerate(entries):
+            element = await self._locate_entry(tab, entry)
+            if element is None:
                 continue
             path = await click_element_and_wait(
-                ctx.worker,
-                element,
-                target,
-                timeout=min(ctx.settings.native_download_timeout_seconds, 60),
-                js_only=True,
+                ctx.worker, element, target, timeout=timeout, js_only=True
             )
             if path is not None:
+                ctx.navigation_diagnostics["cnki_download_entry"] = entry
                 return path
-            try:
-                href = element.get_attribute("href") or ""
-            except Exception:
-                href = ""
+            href = entry.get("href") or ""
             if href.startswith(("http", "/")):
                 url = urljoin(await tab.current_url, href)
                 path = await native_navigation_download(
-                    ctx.worker,
-                    url,
-                    target,
-                    timeout=min(ctx.settings.native_download_timeout_seconds, 60),
+                    ctx.worker, url, target, timeout=timeout
                 )
                 if path is not None:
+                    ctx.navigation_diagnostics["cnki_download_entry"] = entry
                     return path
+            # keep the article page usable for the next candidate
+            if index < len(entries) - 1:
+                try:
+                    await tab.execute_script("history.back();", user_gesture=True)
+                    await asyncio.sleep(ctx.settings.settle_seconds)
+                except Exception:
+                    pass
+        return None
+
+    async def _locate_entry(self, tab, entry: dict):
+        """Re-locate a scanned entry element by its most specific attribute."""
+
+        probes = []
+        if entry.get("id"):
+            probes.append(f"#{entry['id']}")
+        href = entry.get("href") or ""
+        if href:
+            probes.append(f'a[href="{href}"]')
+        cls = (entry.get("cls") or "").strip()
+        if cls:
+            first_class = cls.split()[0]
+            if re.match(r"^[A-Za-z_-][\w-]*$", first_class):
+                probes.append(f".{first_class}")
+        if entry.get("text"):
+            probes.append(f'a[title*="{entry["text"][:10]}"]')
+        for probe in probes:
+            try:
+                element = await tab.query(probe, timeout=2, raise_exc=False)
+            except Exception:
+                element = None
+            if element:
+                return element
         return None

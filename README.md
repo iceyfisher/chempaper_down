@@ -149,6 +149,8 @@ Example A,10.1021/acs.joc.0000001
 
 > 提示：在单条检索框输入内容后点 **转批量**，可把当前关键词直接带入批量输入框。中文标题在 OpenAlex 覆盖有限，请改用 ③ 知网检索。
 
+**返回字段**：每条结果包含 标题、DOI、年份、刊物、**出版社**、**作者**（前 3 位）、**关键词**（按相关度前 5）、**摘要**（OpenAlex 存有摘要时截取显示）、被引次数与 OA 标记。
+
 **连接策略（自动）**：OpenAlex 请求依次尝试 ①环境代理 → ②直连 → ③国内 DoH 解析 + IP 直连（SNI 保持域名），任一通路成功即缓存复用。无论你的网络需要代理还是 DNS 受限，都无需手动配置。
 
 ### 4.3 ③ 知网检索（CNKI）
@@ -167,6 +169,7 @@ Example A,10.1021/acs.joc.0000001
 说明：
 
 - 验证码识别原理：缺口是拼图图案的半透明覆盖层，与原图仅差亮度/颜色变换，归一化互相关（NCC）恰好在该位置出现峰值——程序取 NCC 最强位置为第一候选，未命中时自动换次级候选并刷新图片重试。
+- **下载入口扫描**：进入文章页后，程序对页面 DOM 做结构扫描，枚举所有可见的下载栏目（PDF 下载 / CAJ 下载 / 通用 download 链接 / HTML 阅读），按优先级打分排序后逐个尝试点击或直链下载——覆盖期刊文章、学位论文、会议论文等不同页面变体。命中的栏目与完整入口清单会记录在结果诊断里（`downloads/_manifests/`）。
 - 知网使用持久化浏览器配置（`downloads/_browser_profile/`），验证通过后的一段有效期内后续检索不再弹验证。
 - 检索结果会尝试提取 DOI；**没有登记 DOI 的中文文章也能直接下载**——程序通过文章页直链完成 PDF/CAJ 下载。
 - 提取到的 DOI 与中文标题会写入归档结果（`downloads/_manifests/`）。
@@ -287,7 +290,48 @@ Job 状态机：`queued → running → completed | failed | cancelled`。单篇
 - `GET /api/health`：版本、架构与出版社列表。
 - 上游 AI Agent 对接规范见 [AGENT.md](AGENT.md)。
 
-## 七、归档目录规则
+## 七、MCP 服务（AI / Agent 接入）
+
+本项目内置 **MCP（Model Context Protocol）服务器**，AI 助手（Claude Desktop、Cursor 等）可以直接调用论文检索与下载能力。
+
+### 启动方式
+
+**stdio（本地客户端，推荐）**——入口命令 `paper-tool-mcp`，在 MCP 客户端配置中加入：
+
+```json
+{
+  "mcpServers": {
+    "paper-downloader": {
+      "command": "D:\\Anaconda_envs\\envs\\chem-paper-agent\\python.exe",
+      "args": ["-m", "paper_tool.mcp_server"]
+    }
+  }
+}
+```
+
+**HTTP（远程 Agent）**——`paper-tool-server` 启动的服务自动把 MCP 挂载在：
+
+```text
+http://127.0.0.1:8765/mcp
+```
+
+客户端填入该 URL 即可（streamable HTTP 传输）。`mcp` 包是本项目依赖，`pip install -e .` 后自动可用。
+
+### 工具清单
+
+| 工具 | 功能 |
+|---|---|
+| `search_papers(query, limit)` | OpenAlex 检索，返回 标题 / DOI / 年份 / 刊物 / 出版社 / 作者 / 关键词 / 摘要 / 被引 / OA |
+| `get_paper_metadata(doi)` | 单篇 DOI 的完整元数据 |
+| `resolve_titles(titles)` | 批量标题 → DOI（带相似度） |
+| `search_cnki(query, timeout)` | 知网检索（中文标题 / 关键词 → 标题、DOI、年份） |
+| `download_papers(dois, download_si, wait)` | 提交下载任务；`wait=true` 时阻塞到终态并返回每篇的状态与 pdf/si 落盘路径 |
+| `get_job_status(job_id)` | 轮询已提交的任务 |
+| `list_publishers()` | 当前支持的出版社列表 |
+
+**注意**：`search_cnki` 与知网/IEEE 的下载会弹出有头 Edge 窗口，可能需要人工滑动滑块（见 4.3 节）；无人值守的 Agent 工作流建议优先使用 DOI 直下（ACS/AIP/AAAS/RSC/Wiley/Springer/Elsevier 走无头管线）。
+
+## 八、归档目录规则
 
 每篇文章一个独立目录，目录名 = `DOI_年份_期刊`，内含 `pdf/` 与 `si/` 两个子文件夹：
 
@@ -309,7 +353,7 @@ downloads/
 - **旧版目录完全兼容**：旧结构 `<出版社 - 期刊>/paper/` 中的已下载文件仍会被重复检查识别，不会重复下载。
 - 重复提交规则：正文 + SI 全部校验通过 → `skipped_duplicate` 直接跳过；只缺 SI → 保留正文，仅补 SI。
 
-## 八、配置参考
+## 九、配置参考
 
 长期配置写入项目根目录 `.env`（已被 Git 忽略），服务与子进程自动读取；已存在的系统环境变量优先。
 
@@ -340,7 +384,7 @@ OPENALEX_MAILTO=you@example.com
 
 > API key 只通过服务进程环境传递给子进程，不会写入源码、结果 JSON 或 `_worker_runs/request.json`。
 
-## 九、常见状态与故障排查
+## 十、常见状态与故障排查
 
 ### 条目状态含义
 
@@ -405,6 +449,7 @@ Requires Windows 10/11, Python 3.11+, Microsoft Edge and campus-network access.
 | `paper-tool-app` | Native desktop window (pywebview; falls back to the default browser) |
 | `paper-tool-server` | Web UI + API at http://127.0.0.1:8765 |
 | `paper-tool` | CLI batch downloader |
+| `paper-tool-mcp` | MCP server (stdio) for AI agents |
 
 ### Web UI
 
@@ -429,6 +474,12 @@ POST /api/jobs/items       {"items":[{"doi":"...","download_si":false}]}
 POST /api/jobs/upload | /api/jobs/path | /api/agent/jobs | /api/agent/content
 GET  /api/jobs/{id} · GET /api/jobs/{id}/results · POST /api/jobs/{id}/cancel
 ```
+
+Search rows include authors, journal, publisher, keywords and abstract (when OpenAlex has them).
+
+### MCP
+
+`paper-tool-mcp` runs an MCP server over stdio; the web server also exposes it at `http://127.0.0.1:8765/mcp` (streamable HTTP). Tools: `search_papers`, `get_paper_metadata`, `resolve_titles`, `search_cnki`, `download_papers`, `get_job_status`, `list_publishers`.
 
 ### Archive layout
 

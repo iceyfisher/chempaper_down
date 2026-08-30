@@ -38,7 +38,7 @@ DOH_RESOLVERS = (
 DOH_CACHE_TTL_SECONDS = 600
 SELECT_FIELDS = (
     "id,doi,title,display_name,publication_year,primary_location,"
-    "cited_by_count,open_access,authorships"
+    "cited_by_count,open_access,authorships,keywords,abstract_inverted_index"
 )
 DOI_PREFIX_RE = re.compile(r"^https?://(?:dx\.)?doi\.org/", re.IGNORECASE)
 REQUEST_TIMEOUT = httpx.Timeout(connect=15, read=30, write=15, pool=15)
@@ -101,6 +101,9 @@ class WorkRow:
     authors: list[str]
     cited_by_count: int
     open_access: bool
+    publisher: str | None = None
+    keywords: list[str] | None = None
+    abstract: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -111,6 +114,9 @@ class WorkRow:
             "authors": self.authors,
             "cited_by_count": self.cited_by_count,
             "open_access": self.open_access,
+            "publisher": self.publisher,
+            "keywords": self.keywords,
+            "abstract": self.abstract,
             "source": "openalex",
         }
 
@@ -119,6 +125,44 @@ def _journal_of(work: dict) -> str | None:
     location = work.get("primary_location") or {}
     source = location.get("source") or {}
     return source.get("display_name") or None
+
+
+def _publisher_of(work: dict) -> str | None:
+    location = work.get("primary_location") or {}
+    source = location.get("source") or {}
+    return source.get("host_organization_name") or None
+
+
+def _keywords_of(work: dict, limit: int = 6) -> list[str]:
+    scored = sorted(
+        (work.get("keywords") or []),
+        key=lambda k: k.get("score") or 0,
+        reverse=True,
+    )
+    names: list[str] = []
+    for keyword in scored:
+        name = keyword.get("display_name")
+        if name:
+            names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def _rebuild_abstract(inverted: dict | None) -> str | None:
+    """Rebuild the abstract text from OpenAlex's inverted index."""
+
+    if not isinstance(inverted, dict) or not inverted:
+        return None
+    positioned: list[tuple[int, str]] = []
+    for word, positions in inverted.items():
+        for position in positions or []:
+            positioned.append((int(position), word))
+    if not positioned:
+        return None
+    positioned.sort()
+    abstract = " ".join(word for _, word in positioned)
+    return abstract or None
 
 
 def _authors_of(work: dict, limit: int = 6) -> list[str]:
@@ -148,6 +192,9 @@ def parse_work(work: dict) -> WorkRow | None:
         authors=_authors_of(work),
         cited_by_count=int(work.get("cited_by_count") or 0),
         open_access=bool((work.get("open_access") or {}).get("is_oa")),
+        publisher=_publisher_of(work),
+        keywords=_keywords_of(work),
+        abstract=_rebuild_abstract(work.get("abstract_inverted_index")),
     )
 
 
@@ -311,3 +358,21 @@ async def resolve_titles(titles: list[str]) -> list[dict]:
             await asyncio.sleep(0.15)
         results.append(await resolve_title(title))
     return results
+
+
+async def fetch_metadata(doi: str) -> dict | None:
+    """Fetch full metadata for one DOI (authors/journal/publisher/keywords/abstract)."""
+
+    doi = clean_doi(doi)
+    if not doi:
+        return None
+    params = {"filter": f"doi:{doi}", "per-page": 1, "select": SELECT_FIELDS}
+    mailto = _mailto()
+    if mailto:
+        params["mailto"] = mailto
+    payload = await openalex_get(params)
+    results = payload.get("results") or []
+    if not results:
+        return None
+    row = parse_work(results[0])
+    return row.to_dict() if row else None

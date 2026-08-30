@@ -24,10 +24,32 @@ from .search import resolve_titles, search_openalex
 BASE_SETTINGS = Settings.from_env()
 JOB_MANAGER = JobManager(BASE_SETTINGS)
 
+# Optional MCP exposure: when the `mcp` package is installed, agents can talk
+# to this server over streamable HTTP at http://<host>:<port>/mcp.
+try:
+    from .mcp_server import mcp as _mcp_instance
+
+    _MCP_APP = _mcp_instance.streamable_http_app()
+    _MCP_AVAILABLE = True
+except ImportError:
+    _mcp_instance = None
+    _MCP_APP = None
+    _MCP_AVAILABLE = False
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    if _MCP_AVAILABLE:
+        # Starlette does not run mounted sub-app lifespans: manage the MCP
+        # session manager explicitly for the lifetime of the server.
+        async with _mcp_instance.session_manager.run():
+            yield
+    else:
+        yield
+    await _shutdown()
+
+
+async def _shutdown():
     # Graceful server shutdown: cancellation propagates to DownloadService,
     # which kills every active DOI subprocess tree and descendant Edge.
     for job_id in list(JOB_MANAGER.tasks):
@@ -359,6 +381,12 @@ async def cancel_job(job_id: str):
         raise HTTPException(404, "Job not found")
     cancelled = await JOB_MANAGER.cancel(job_id)
     return {"job_id": job_id, "cancelled": cancelled, "status": JOB_MANAGER.get(job_id).status}
+
+
+if _MCP_AVAILABLE:
+    # Mounted after every API/UI route so they keep matching priority; the
+    # sub-app serves the MCP streamable endpoint at /mcp.
+    app.mount("/", _MCP_APP)
 
 
 def main():
