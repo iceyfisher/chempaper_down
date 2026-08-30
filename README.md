@@ -21,6 +21,7 @@
 | Wiley | ✅ | ✅ | 自动使用 600 秒整篇预算 |
 | Springer Nature / SpringerLink | ✅ | ✅ | |
 | Elsevier / ScienceDirect | ✅ 官方 API | ✅ 公开 CDN | 需要配置 `ELSEVIER_API_KEY` |
+| **IEEE Xplore** | ✅ | ❌ 无 SI | stamp.jsp → ielx*.pdf 直链下载，有头窗口过反爬 |
 | **CNKI 中国知网** | ✅ | ❌ 无 SI | 检索中文文献，提取 DOI 与中文标题，下载正文 PDF |
 | **OpenAlex** | 🔍 仅检索 | — | 免费开源学术数据库，标题 → DOI 解析 |
 
@@ -160,17 +161,22 @@ Example A,10.1021/acs.joc.0000001
 
 1. 输入中文标题或关键词（如 `锂离子电池 界面改性`）。
 2. 点击 **🔍 检索知网** 并确认。
-3. 程序弹出独立的 Edge 窗口访问知网。若出现滑块验证，先自动求解；**自动失败时请在该窗口中手动滑动滑块**，程序检测到验证通过后自动继续（默认等待 120 秒，可用 `PAPER_TOOL_CNKI_MANUAL_WAIT` 调整）。
+3. 程序弹出独立的 Edge 窗口访问知网。若出现滑块验证，先自动求解（模板匹配定位缺口 + 拟人轨迹拖动，多候选自动重试）；**自动失败时请在该窗口中手动滑动滑块**，程序检测到验证通过后自动继续（默认等待 120 秒，可用 `PAPER_TOOL_CNKI_MANUAL_WAIT` 调整）。
 4. 每条结果提供 **复制 DOI** 与 **下载原文**；知网文章没有 SI，不提供 SI 按钮。
 
 说明：
 
+- 验证码识别原理：缺口是拼图图案的半透明覆盖层，与原图仅差亮度/颜色变换，归一化互相关（NCC）恰好在该位置出现峰值——程序取 NCC 最强位置为第一候选，未命中时自动换次级候选并刷新图片重试。
 - 知网使用持久化浏览器配置（`downloads/_browser_profile/`），验证通过后的一段有效期内后续检索不再弹验证。
 - 检索结果会尝试提取 DOI；**没有登记 DOI 的中文文章也能直接下载**——程序通过文章页直链完成 PDF/CAJ 下载。
 - 提取到的 DOI 与中文标题会写入归档结果（`downloads/_manifests/`）。
 - 检索与下载互不影响：检索只读页面，下载走完整的单篇子进程管线（同样有头 + 验证处理）。
 
-### 4.4 ④ 任务与结果
+### 4.4 IEEE Xplore 下载
+
+IEEE 文章（DOI 前缀 `10.1109/`）与知网一样使用**有头窗口 + 持久化配置**（IEEE 对无头会话返回 Error 418 反爬拦截）。下载链路：文章页轮询等待 Angular 渲染出 PDF 按钮 → 从 stamp.jsp 页面的 iframe 提取真实 PDF 直链（`ielx*/<arnumber>.pdf`）→ 新标签页直接下载 → 返回上一页。标题、期刊、年份、真实 DOI 取自页面 `xplGlobal` 状态。IEEE 文章无 SI。IEEE Access 等开放获取期刊可直接下载；订阅期刊需要校园网权限。
+
+### 4.5 ④ 任务与结果
 
 ![任务与结果](docs/screenshots/04-jobs-results.png)
 
@@ -375,6 +381,7 @@ Automated article PDF + Supporting Information (SI) downloader over campus-netwo
 | Source | PDF | SI | Notes |
 |---|---|---|---|
 | ACS / AIP / AAAS / RSC / Wiley / Springer | ✅ | ✅ | Browser adapters, Cloudflare-aware |
+| IEEE Xplore | ✅ | ❌ | headful window (Error 418 anti-bot), stamp.jsp → ielx*.pdf |
 | Elsevier | ✅ official API | ✅ public CDN | requires `ELSEVIER_API_KEY` |
 | CNKI | ✅ | ❌ | DOI + Chinese title extraction, main PDF only |
 | OpenAlex | 🔍 search only | — | free title → DOI resolution |

@@ -254,106 +254,93 @@ def _png_from_data_uri(uri: str) -> bytes:
 def find_gap_candidates(panel_png: bytes, piece_png: bytes, limit: int = 4) -> list[int]:
     """Rank candidate gap offsets for the CNKI slider captcha.
 
-    Two facts about this widget family drive the detection:
-
-    * The panel image contains a bright pre-rendered COPY of the piece at its
-      solved position; a plain template match therefore finds the copy, not
-      the hole. We locate the copy first (NCC peak) and exclude its range.
-    * The actual hole is a darkened notch. We rank offsets by "donut
-      contrast": mean darkness inside the piece box minus the mean darkness
-      of the surrounding ring, using a row-local background estimate.
-
-    The ranking is heuristic, so callers should try candidates in order and
-    fall back to the widget's own refresh between attempts.
+    Verified against live captures: the kns panel renders the hole as a
+    translucent overlay of the piece artwork (white- or dark-tinted). That is
+    an affine transform of the artwork, and normalized cross-correlation is
+    invariant to affine intensity changes, so the piece-to-panel NCC peaks
+    exactly AT the hole. Rank the strongest NCC positions (spaced apart) as
+    candidates; the retry loop advances through them across widget refreshes.
+    A donut-contrast darkness ranking is kept as a degenerate-case fallback.
     """
+
+    import numpy as np
 
     pw, ph, panel = _decode_png_rgba(panel_png)
     sw, sh, piece = _decode_png_rgba(piece_png)
-    opaque = [
-        (y, x)
-        for y in range(sh)
-        for x in range(sw)
-        if piece[y][x][3] > 40
-    ]
-    if not opaque:
+
+    # Luminance planes, vectorized.
+    panel_l = np.asarray(panel, dtype=np.float32)[:, :, :3].mean(axis=2)
+    piece_a = np.asarray(piece, dtype=np.float32)[:, :, 3]
+    piece_l = np.asarray(piece, dtype=np.float32)[:, :, :3].mean(axis=2)
+
+    opaque_rows, opaque_cols = np.where(piece_a > 40)
+    if opaque_rows.size == 0:
         return []
-    ys = [y for y, _ in opaque]
-    y0, y1 = min(ys), max(ys)
+    ry0, ry1 = int(opaque_rows.min()), int(opaque_rows.max())
+    rx0, rx1 = int(opaque_cols.min()), int(opaque_cols.max())
+    pw_int = pw
 
-    def lum(px):
-        return sum(px[:3]) / 3
+    # piece window aligned so that opaque pixel (y, x) sits at panel (y, off+x)
+    piece_win = piece_l[ry0:ry1 + 1, rx0:rx1 + 1]
+    mask = piece_a[ry0:ry1 + 1, rx0:rx1 + 1] > 40
+    tpl = piece_win[mask]
+    tpl_mean = tpl.mean()
+    tpl_norm = float(np.sqrt(((tpl - tpl_mean) ** 2).sum()))
+    if tpl_norm == 0:
+        return []
 
-    # --- locate the pre-rendered copy via NCC ---
-    pl = [lum(piece[y][x]) for (y, x) in opaque]
-
-    def ncc(off):
-        ql = [lum(panel[y][min(x + off, pw - 1)]) for (y, x) in opaque]
-        n = len(pl)
-        mp, mq = sum(pl) / n, sum(ql) / n
-        sp = (sum((v - mp) ** 2 for v in pl)) ** 0.5
-        sq = (sum((v - mq) ** 2 for v in ql)) ** 0.5
-        if sp == 0 or sq == 0:
-            return 0.0
-        return sum((a - mp) * (b - mq) for a, b in zip(pl, ql)) / (sp * sq)
-
-    ncc_map = [(ncc(o), o) for o in range(5, pw - sw)]
-    # Exclude the pre-rendered piece copy: the global NCC peak region always,
-    # plus any other strongly-correlated stretch (partial overlaps).
-    peak = max(ncc_map)[1] if ncc_map else None
-    copy_offsets = {o for c, o in ncc_map if c > 0.35}
-    if peak is not None:
-        copy_offsets.add(peak)
-
-    # --- darkness map relative to row-local background ---
-    dark = [[0.0] * pw for _ in range(y0, y1 + 1)]
-    for i, y in enumerate(range(y0, y1 + 1)):
-        lums = [lum(panel[y][x]) for x in range(pw)]
-        for x in range(pw):
-            window = sorted(lums[max(0, x - 25):min(pw, x + 25)])
-            bg = window[int(len(window) * 0.8)]
-            dark[i][x] = max(0.0, bg - lums[x])
-
-    piece_cols = sorted({x for _, x in opaque})
-    px0, px1 = piece_cols[0], piece_cols[-1]
-    width = px1 - px0 + 1
-
-    def donut_contrast(off):
-        inside = ring = 0.0
-        n_in = n_out = 0
-        ring_w = 10
-        for i in range(len(dark)):
-            for x in range(px0, px1 + 1):
-                if x + off >= pw:
-                    break
-                inside += dark[i][x + off]
-                n_in += 1
-            for x in list(range(max(0, off - ring_w), off)) + list(
-                range(min(pw - 1, off + width), min(pw, off + width + ring_w))
-            ):
-                ring += dark[i][x]
-                n_out += 1
-        if not n_in or not n_out:
-            return 0.0
-        return inside / n_in - 0.5 * (ring / n_out)
-
-    scored = []
-    for off in range(5, pw - width - 2):
-        if any(abs(off - c) < 60 for c in copy_offsets):
+    # The hole never sits under the piece's own start position; skip the
+    # left margin. Candidates must be >= 30 so the drag is always rightward.
+    scored: list[tuple[float, int]] = []
+    for off in range(30, pw_int - rx1):
+        win = panel_l[ry0:ry1 + 1, off + rx0:off + rx1 + 1]
+        if win.shape != piece_win.shape:
             continue
-        scored.append((donut_contrast(off), off))
+        w = win[mask]
+        m = w.mean()
+        d = float(np.sqrt(((w - m) ** 2).sum()))
+        if d == 0:
+            continue
+        corr = float(((w - m) * (tpl - tpl_mean)).sum()) / (d * tpl_norm)
+        scored.append((corr, off))
     scored.sort(reverse=True)
 
-    # keep distinct peaks (>= 20px apart)
+    # keep distinct peaks (>= 25px apart)
     picked: list[int] = []
     for score, off in scored:
-        if score <= 0:
-            break
-        if all(abs(off - p) >= 20 for p in picked):
+        if all(abs(off - p) >= 25 for p in picked):
             picked.append(off)
         if len(picked) >= limit:
             break
-    # never return an offset left of the piece's own start plus margin
-    return [o for o in picked if o >= 30] or picked[:1]
+
+    if not picked:
+        # --- fallback: donut darkness contrast (row-local background) ---
+        dark = []
+        for y in range(ry0, ry1 + 1):
+            lums = panel_l[y]
+            out = np.empty(pw_int, dtype=np.float32)
+            for x in range(30, pw_int):
+                window = np.sort(lums[max(0, x - 25):min(pw_int, x + 25)])
+                out[x] = max(0.0, float(window[int(len(window) * 0.8)]) - float(lums[x]))
+            dark.append(out)
+        dark = np.asarray(dark)
+        piece_cols = np.arange(rx0, rx1 + 1)
+        width = rx1 - rx0 + 1
+        ring = 10
+        scored2 = []
+        for off in range(30, pw_int - width - 2):
+            inside = float(dark[:, off + piece_cols].mean())
+            left = dark[:, max(0, off - ring):off]
+            right = dark[:, min(pw_int, off + width):min(pw_int, off + width + ring)]
+            ring_mean = float(np.concatenate([left.ravel(), right.ravel()]).mean()) if left.size + right.size else 0.0
+            scored2.append((inside - 0.5 * ring_mean, off))
+        scored2.sort(reverse=True)
+        for score, off in scored2:
+            if all(abs(off - p) >= 25 for p in picked):
+                picked.append(off)
+            if len(picked) >= limit:
+                break
+    return picked
 
 
 async def try_solve_slider_captcha(tab, candidate_index: int = 0) -> bool:

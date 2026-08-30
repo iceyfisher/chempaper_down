@@ -11,3 +11,6 @@ dist/
 
 downloads/
 manual_tests/publishers/_runs/
+
+# ZCode local session data
+.zcode/

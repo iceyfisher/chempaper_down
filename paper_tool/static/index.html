@@ -12,6 +12,7 @@
       --shadow:4px 4px 0 var(--ink); --shadow-lg:6px 6px 0 var(--ink);
     }
     *{box-sizing:border-box}
+    [hidden]{display:none!important}
     body{margin:0;background:var(--paper);color:var(--ink);
       font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
       background-image:radial-gradient(rgba(17,17,17,.07) 1.2px,transparent 1.2px);background-size:22px 22px}
@@ -211,7 +212,7 @@
           <button id="batchDownloadSi" class="b-btn" disabled>⬇ 选中 +SI</button>
           <button id="batchDownloadPdf" class="b-btn" disabled>⬇ 选中 PDF</button>
           <button id="batchCopy" class="b-btn" disabled>📋 复制 DOI</button>
-          <span id="batchStats" class="b-badge w"></span>
+          <span id="batchStats" class="b-badge w" hidden></span>
         </div>
         <div class="divider"></div>
         <div id="batchResults"></div>
@@ -393,12 +394,13 @@ async function downloadItems(items,si){
 
 /* ---------- batch title resolution ---------- */
 let batchRows=[];
+function showBatchStats(t){const b=$('#batchStats');b.textContent=t;b.hidden=false}
 async function doBatchResolve(btn){
   const titles=$('#batchTitles').value.split('\n').map(x=>x.trim()).filter(Boolean);
   if(!titles.length){toast('请先粘贴标题列表',true);return}
   const ok=await confirmModal('批量解析',`对 ${titles.length} 个标题解析 DOI`);
   if(!ok)return;
-  setLoading(btn,true);$('#batchStats').textContent='解析中…';
+  setLoading(btn,true);showBatchStats('解析中…');
   try{
     try{batchRows=(await jsonFetch('/api/search/academic/batch',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({titles})})).rows}
@@ -419,11 +421,11 @@ async function doBatchResolve(btn){
       toast('服务检索不可达，已改用浏览器直连')}
     const resolved=batchRows.filter(r=>r.doi).length;
     $('#batchResults').innerHTML=batchRows.map(r=>hitCard(r)).join('');
-    $('#batchStats').textContent=`${resolved}/${batchRows.length}`;
+    showBatchStats(`${resolved}/${batchRows.length}`);
     const has=resolved>0;
     ['batchDownloadSi','batchDownloadPdf','batchCopy'].forEach(id=>$('#'+id).disabled=!has);
     toast(`解析完成：${resolved}/${batchRows.length} 匹配到 DOI`)}
-  catch(e){$('#batchStats').textContent='失败';toast('批量解析失败：'+e.message,true)}
+  catch(e){showBatchStats('失败');toast('批量解析失败：'+e.message,true)}
   finally{setLoading(btn,false)}}
 async function batchDownload(si){
   const items=batchRows.filter(r=>r.doi).map(r=>({doi:r.doi,title_query:r.query,download_si:si}));
