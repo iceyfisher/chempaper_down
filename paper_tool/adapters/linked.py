@@ -115,44 +115,40 @@ class LinkedPublisherAdapter(PublisherAdapter):
     fallback_journals = {}
 
     async def prepare_article(self, ctx):
-        # Both attempts share one budget; the DOI parent remains authoritative.
-        budget = min(90, max(10, ctx.settings.article_timeout_seconds * 0.5))
+        # Reuse the established refresh/helper/post-challenge wait sequence.
+        # Reserve at least a quarter of the DOI budget for actual downloads.
+        budget = max(10, ctx.settings.article_timeout_seconds * 0.75)
         deadline = asyncio.get_running_loop().time() + budget
         attempts = []
-        url = f'https://doi.org/{ctx.doi}'
+        ctx.navigation_diagnostics['navigation_budget_seconds'] = budget
+        ctx.navigation_diagnostics['navigation_attempts'] = attempts
         for attempt in range(2):
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 break
-            allowance = remaining / (2 - attempt)
+            started = asyncio.get_running_loop().time()
+            record = {'attempt': attempt + 1}
+            attempts.append(record)
             try:
-                async with asyncio.timeout(allowance):
-                    try:
-                        await asyncio.wait_for(ctx.tab.go_to(url), timeout=min(15, allowance / 3))
-                    except TimeoutError:
-                        pass
-                    ready = await self.wait_for_article_dom(ctx.tab, timeout=5)
-                    if not ready and ctx.settings.enable_pydoll_cloudflare_helper:
-                        helper = getattr(ctx.tab, '_bypass_cloudflare', None)
-                        if helper:
-                            try:
-                                await asyncio.wait_for(helper({}, time_to_wait_captcha=10), timeout=11)
-                            except Exception as exc:
-                                if self.is_browser_disconnect(exc):
-                                    raise
-                                ctx.navigation_diagnostics['pydoll_cloudflare_error'] = type(exc).__name__
-                    url = await asyncio.wait_for(ctx.tab.current_url, timeout=3)
+                async with asyncio.timeout(remaining):
+                    url = await self.navigate(ctx, cloudflare=True)
+                    # Inspect access after the post-helper DOM wait has finished.
+                    ready = ctx.navigation_diagnostics.get('article_dom_after_cloudflare_helper')
+                    if ready is None:
+                        ready = await self.wait_for_article_dom(
+                            ctx.tab, timeout=ctx.settings.cloudflare_timeout_seconds,
+                        )
                     issue = await self.access_issue(ctx.tab)
-                    ready = await self.wait_for_article_dom(ctx.tab, timeout=5)
-                    attempts.append({'attempt': attempt + 1, 'url': url,
-                                     'ready': ready, 'issue': issue})
+                    record.update(url=url, ready=ready, issue=issue,
+                                  helper=ctx.navigation_diagnostics.get('pydoll_cloudflare_helper'))
                     if ready and not issue:
-                        ctx.navigation_diagnostics['navigation_attempts'] = attempts
                         return url, None
             except Exception as exc:
                 if self.is_browser_disconnect(exc):
                     raise
-                attempts.append({'attempt': attempt + 1, 'error': type(exc).__name__})
+                record['error'] = type(exc).__name__
+            finally:
+                record['elapsed_seconds'] = round(asyncio.get_running_loop().time() - started, 3)
         ctx.navigation_diagnostics['navigation_attempts'] = attempts
         try:
             url = await asyncio.wait_for(ctx.tab.current_url, timeout=3)

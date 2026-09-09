@@ -88,12 +88,44 @@ def test_navigation_retries_exactly_once_without_browser():
     ctx = AdapterContext(SimpleNamespace(main_tab=tab),
                          Settings(enable_pydoll_cloudflare_helper=False), '10.1021/example')
     adapter = ACSAdapter()
+    adapter.navigate = AsyncMock(return_value='https://pubs.acs.org/doi/example')
     adapter.wait_for_article_dom = AsyncMock(return_value=False)
     adapter.access_issue = AsyncMock(return_value='Publisher access challenge')
     _, issue = asyncio.run(adapter.prepare_article(ctx))
     assert issue == 'Publisher access challenge'
-    assert tab.go_to.await_count == 2
+    assert adapter.navigate.await_count == 2
     assert len(ctx.navigation_diagnostics['navigation_attempts']) == 2
+
+
+def test_restored_refresh_helper_and_full_post_wait():
+    class Tab:
+        go_to = AsyncMock()
+        refresh = AsyncMock()
+        _bypass_cloudflare = AsyncMock()
+
+        @property
+        async def current_url(self):
+            return 'https://pubs.acs.org/article/example'
+
+    tab = Tab()
+    settings = Settings(article_timeout_seconds=360, cloudflare_timeout_seconds=60, settle_seconds=0)
+    ctx = AdapterContext(SimpleNamespace(main_tab=tab), settings, '10.1021/example')
+    adapter = ACSAdapter()
+    adapter.wait_for_article_dom = AsyncMock(side_effect=[False, True])
+    adapter.access_issue = AsyncMock(return_value=None)
+    url, issue = asyncio.run(adapter.prepare_article(ctx))
+    assert issue is None and '/article/example' in url
+    tab.refresh.assert_awaited_once()
+    tab._bypass_cloudflare.assert_awaited_once_with({}, time_to_wait_captcha=60)
+    assert [call.kwargs['timeout'] for call in adapter.wait_for_article_dom.await_args_list] == [3, 60]
+    assert len(ctx.navigation_diagnostics['navigation_attempts']) == 1
+    assert ctx.navigation_diagnostics['navigation_budget_seconds'] == 270
+
+
+def test_extended_cloudflare_setting_survives_worker_payload():
+    settings = Settings(cloudflare_timeout_seconds=90).normalized()
+    assert settings.cloudflare_timeout_seconds == 90
+    assert Settings.from_worker_payload(settings.to_worker_payload()).cloudflare_timeout_seconds == 90
 
 
 def test_native_html_stays_out_of_final_directory(tmp_path, monkeypatch):

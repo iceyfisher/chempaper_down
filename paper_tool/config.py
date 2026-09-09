@@ -29,7 +29,7 @@ class Settings:
     normal_element_timeout_seconds: int = 18
     native_download_timeout_seconds: int = 35
     blob_download_timeout_seconds: int = 75
-    cloudflare_timeout_seconds: int = 30
+    cloudflare_timeout_seconds: int = 60
     settle_seconds: float = 1.2
 
     max_concurrency_hard_limit: int = 4
@@ -56,7 +56,7 @@ class Settings:
             normal_element_timeout_seconds=int(os.getenv("PAPER_TOOL_ELEMENT_TIMEOUT", "18")),
             native_download_timeout_seconds=int(os.getenv("PAPER_TOOL_NATIVE_TIMEOUT", "35")),
             blob_download_timeout_seconds=int(os.getenv("PAPER_TOOL_BLOB_TIMEOUT", "75")),
-            cloudflare_timeout_seconds=int(os.getenv("PAPER_TOOL_CLOUDFLARE_TIMEOUT", "30")),
+            cloudflare_timeout_seconds=int(os.getenv("PAPER_TOOL_CLOUDFLARE_TIMEOUT", "60")),
             elsevier_api_key=os.getenv("ELSEVIER_API_KEY") or None,
             enable_pydoll_cloudflare_helper=(
                 os.getenv("PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER", "1").strip().lower()
@@ -85,7 +85,7 @@ class Settings:
             normal_element_timeout_seconds=max(2, min(int(self.normal_element_timeout_seconds), article_timeout)),
             native_download_timeout_seconds=max(5, min(int(self.native_download_timeout_seconds), article_timeout)),
             blob_download_timeout_seconds=max(10, min(int(self.blob_download_timeout_seconds), article_timeout)),
-            cloudflare_timeout_seconds=max(3, min(int(self.cloudflare_timeout_seconds), 45)),
+            cloudflare_timeout_seconds=max(3, min(int(self.cloudflare_timeout_seconds), 120)),
         )
 
     def with_overrides(
@@ -134,7 +134,7 @@ class Settings:
             normal_element_timeout_seconds=int(payload.get("normal_element_timeout_seconds", 18)),
             native_download_timeout_seconds=int(payload.get("native_download_timeout_seconds", 35)),
             blob_download_timeout_seconds=int(payload.get("blob_download_timeout_seconds", 75)),
-            cloudflare_timeout_seconds=int(payload.get("cloudflare_timeout_seconds", 30)),
+            cloudflare_timeout_seconds=int(payload.get("cloudflare_timeout_seconds", 60)),
             settle_seconds=float(payload.get("settle_seconds", 1.2)),
             # The child inherits the server environment. Never serialize API keys
             # into downloads/_worker_runs/request.json.

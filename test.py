@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -37,8 +38,9 @@ async def run(args):
     root = Path(__file__).resolve().parent / 'manual_tests/publishers/_runs' / f'{stamp}_{uuid4().hex[:8]}'
     root.mkdir(parents=True, exist_ok=False)
     settings = Settings.from_env(root / 'downloads').with_overrides(
-        max_concurrency=1, article_timeout_seconds=240,
+        max_concurrency=1, article_timeout_seconds=args.article_timeout,
     )
+    settings = replace(settings, cloudflare_timeout_seconds=args.cloudflare_timeout).normalized()
     reports = []
     report_path = root / 'report.json'
 
@@ -47,6 +49,8 @@ async def run(args):
             'created_at': datetime.now(timezone.utc).isoformat(),
             'run_root': str(root), 'requested_dois': dois, 'cases': reports,
             'finished_count': len(reports),
+            'article_timeout_seconds': settings.article_timeout_seconds,
+            'cloudflare_timeout_seconds': settings.cloudflare_timeout_seconds,
             'passed': len(reports) == len(dois) and all(r['passed'] for r in reports),
         }, ensure_ascii=False, indent=2), encoding='utf-8')
 
@@ -78,6 +82,8 @@ if __name__ == '__main__':
     selection.add_argument('--publisher', choices=CASES)
     selection.add_argument('--all', action='store_true')
     parser.add_argument('--doi')
+    parser.add_argument('--article-timeout', type=int, choices=range(120, 601), default=360, metavar='120..600')
+    parser.add_argument('--cloudflare-timeout', type=int, choices=range(3, 121), default=60, metavar='3..120')
     args = parser.parse_args()
     if args.all and args.doi:
         parser.error('--all cannot be combined with --doi')

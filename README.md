@@ -375,7 +375,7 @@ downloads/
 | `PAPER_TOOL_NAV_TIMEOUT` | `30` | 页面导航软超时 |
 | `PAPER_TOOL_NATIVE_TIMEOUT` | `35` | 原生下载等待 |
 | `PAPER_TOOL_BLOB_TIMEOUT` | `75` | 页内 fetch/Blob 下载等待 |
-| `PAPER_TOOL_CLOUDFLARE_TIMEOUT` | `30` | Cloudflare 挑战处理等待 |
+| `PAPER_TOOL_CLOUDFLARE_TIMEOUT` | `60` | Pydoll 挑战处理和验证后页面等待各自的上限；可设 3–120 秒 |
 | `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER` | `1` | 是否启用 Pydoll Cloudflare 助手 |
 | `PAPER_TOOL_KILL_GRACE` | `5` | 子进程终止宽限（秒） |
 | `PAPER_TOOL_CNKI_MANUAL_WAIT` | `120` | 知网滑块验证自动失败后等待人工滑动的时间（秒） |
