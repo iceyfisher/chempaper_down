@@ -100,15 +100,13 @@ async def run_one(request_path: Path, result_path: Path) -> int:
         write_json_atomic(result_path, result.to_dict())
         return 2
 
-    # CNKI and IEEE run headful with a persistent profile: CNKI's slider
-    # CAPTCHA needs a visible window (auto-solve first, manual fallback), and
-    # IEEE Xplore serves Error 418 to headless sessions.
+    # Retain existing profile selection, but downloads must never open a window.
     is_trusted_profile = getattr(adapter, "key", "") in {"CNKI", "IEEE"}
     worker = BrowserWorker(
         1,
         settings,
         persistent_profile=is_trusted_profile,
-        headless=not is_trusted_profile,
+        headless=True,
     )
     try:
         event("browser_start", "Starting isolated Edge process", publisher=adapter.key)
