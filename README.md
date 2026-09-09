@@ -14,18 +14,24 @@
 
 | 出版社 / 数据源 | 正文 | 补充材料 SI | 说明 |
 |---|---|---|---|
-| ACS | ✅ | ✅ | 校园网权限，自动过 Cloudflare 挑战 |
+| ACS（含 ACS Omega） | ✅ | ✅ | 后台有界处理访问验证；持续受阻会明确报告 |
 | AIP Publishing | ✅ | ✅ | |
 | AAAS / Science | ✅ | ✅ | |
 | Royal Society of Chemistry | ✅ | ✅ | |
+| Taylor & Francis | ✅ | ✅（如有） | `10.1080/*`；Supplemental / 关联 Figshare，待校园网实测 |
 | Wiley | ✅ | ✅ | 自动使用 600 秒整篇预算 |
 | Springer Nature / SpringerLink | ✅ | ✅ | |
 | Elsevier / ScienceDirect | ✅ 官方 API | ✅ 公开 CDN | 需要配置 `ELSEVIER_API_KEY` |
-| **IEEE Xplore** | ✅ | ❌ 无 SI | stamp.jsp → ielx*.pdf 直链下载，有头窗口过反爬 |
+| **IEEE Xplore** | ✅ | ❌ 无 SI | stamp.jsp → ielx*.pdf；下载后台运行，验证受阻可能失败 |
 | **CNKI 中国知网** | ✅ | ❌ 无 SI | 检索中文文献，提取 DOI 与中文标题，下载正文 PDF |
 | **OpenAlex** | 🔍 仅检索 | — | 免费开源学术数据库，标题 → DOI 解析 |
 
 无法识别的 DOI 会自动兜底路由到知网检索。SI 支持识别 PDF、ZIP、Office 文档、图片、视频等格式。同一 DOI 重复提交会自动跳过；只缺部分附件时保留已下载内容，只补缺失部分。
+
+校园网手动验证：`python test.py --publisher rsc`、`python test.py --publisher acs`、
+`python test.py --publisher taylor`。也可使用 `--doi <DOI>` 或 `--all`。
+结果保存在独立的 `manual_tests/publishers/_runs/`，详见[测试说明](manual_tests/publishers/README.md)。
+Taylor & Francis 完整扫描后无 SI 可以是正常 `0/0`；验证受阻时扫描保持未完成。
 
 ## 二、安装
 
@@ -329,7 +335,7 @@ http://127.0.0.1:8765/mcp
 | `get_job_status(job_id)` | 轮询已提交的任务 |
 | `list_publishers()` | 当前支持的出版社列表 |
 
-**注意**：`search_cnki` 与知网/IEEE 的下载会弹出有头 Edge 窗口，可能需要人工滑动滑块（见 4.3 节）；无人值守的 Agent 工作流建议优先使用 DOI 直下（ACS/AIP/AAAS/RSC/Wiley/Springer/Elsevier 走无头管线）。
+**注意**：下载任务统一无头运行，不弹出 Edge 窗口；网站要求人工验证时可能失败。`search_cnki` 独立检索入口保留原有行为。
 
 ## 八、归档目录规则
 
@@ -425,10 +431,16 @@ Automated article PDF + Supporting Information (SI) downloader over campus-netwo
 | Source | PDF | SI | Notes |
 |---|---|---|---|
 | ACS / AIP / AAAS / RSC / Wiley / Springer | ✅ | ✅ | Browser adapters, Cloudflare-aware |
-| IEEE Xplore | ✅ | ❌ | headful window (Error 418 anti-bot), stamp.jsp → ielx*.pdf |
+| IEEE Xplore | ✅ | ❌ | headless download; access challenges may prevent retrieval |
+| Taylor & Francis | ✅ | ✅ if present | `10.1080/*`, Supplemental and linked Figshare files; campus-network verification pending |
 | Elsevier | ✅ official API | ✅ public CDN | requires `ELSEVIER_API_KEY` |
 | CNKI | ✅ | ❌ | DOI + Chinese title extraction, main PDF only |
 | OpenAlex | 🔍 search only | — | free title → DOI resolution |
+
+Manual campus-network checks: run `python test.py --publisher rsc` (or `acs`,
+`taylor`), `--doi <DOI>`, or `--all`. Reports and downloads are isolated under
+`manual_tests/publishers/_runs/`. Offline regression checks do not verify
+publisher download access. See [test instructions](manual_tests/publishers/README.md).
 
 ### Install
 
