@@ -33,11 +33,6 @@
 
 无法识别的 DOI 会自动兜底路由到知网检索。SI 支持识别 PDF、ZIP、Office 文档、图片、视频等格式。同一 DOI 重复提交会自动跳过；只缺部分附件时保留已下载内容，只补缺失部分。正文获取失败时自动查询 OpenAlex 的开放仓库副本（绿色 OA），直接下载或经浏览器通过反爬后下载。
 
-校园网手动验证：`python test.py --publisher rsc`、`python test.py --publisher acs`、
-`python test.py --publisher taylor`。也可使用 `--doi <DOI>` 或 `--all`。
-结果保存在独立的 `manual_tests/publishers/_runs/`，详见[测试说明](manual_tests/publishers/README.md)。
-Taylor & Francis 完整扫描后无 SI 可以是正常 `0/0`；验证受阻时扫描保持未完成。
-
 ## 二、安装
 
 要求：Windows 10/11、Python 3.11+、Microsoft Edge、校园网（或可访问出版社的网络）。Elsevier 官方 API 需要额外的 API key。
@@ -444,11 +439,6 @@ Automated article PDF + Supporting Information (SI) downloader over campus-netwo
 | Elsevier | ✅ official API | ✅ public CDN | requires `ELSEVIER_API_KEY` |
 | CNKI | ✅ | ❌ | DOI + Chinese title extraction, main PDF only |
 | OpenAlex | 🔍 search only | — | free title → DOI resolution |
-
-Manual campus-network checks: run `python test.py --publisher rsc` (or `acs`,
-`taylor`), `--doi <DOI>`, or `--all`. Reports and downloads are isolated under
-`manual_tests/publishers/_runs/`. Offline regression checks do not verify
-publisher download access. See [test instructions](manual_tests/publishers/README.md).
 
 ### Install
 
