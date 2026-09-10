@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from .linked import LinkedPublisherAdapter, snapshot_page, unique_links
+from ..netutil import env_proxy_usable
 
 
 def figshare_article_id(url):
@@ -35,22 +36,49 @@ class TaylorFrancisAdapter(LinkedPublisherAdapter):
         ])
         for item in supplemental:
             tab = await ctx.browser.new_tab()
+            helper = None
+            page_diagnostics = {}
             try:
-                await asyncio.wait_for(tab.go_to(item['url']), ctx.settings.navigation_timeout_seconds)
+                # Supplemental pages sit behind the same Cloudflare challenge as
+                # the article page, so arm the helper on this tab as well.
+                helper = await self.arm_cloudflare_helper(
+                    ctx, tab=tab, diagnostics=page_diagnostics,
+                )
+                try:
+                    await asyncio.wait_for(
+                        tab.go_to(item['url']), ctx.settings.navigation_timeout_seconds,
+                    )
+                except Exception as exc:
+                    if self.is_browser_disconnect(exc):
+                        raise
+                if helper is not None:
+                    await self.run_cloudflare_helper(
+                        ctx, helper, tab=tab, diagnostics=page_diagnostics,
+                    )
                 if await self.access_issue(tab):
                     raise ValueError('Supplemental page is blocked')
                 if not await self.wait_for_article_dom(tab, timeout=5):
                     raise ValueError('Supplemental page could not be verified')
-                page = await snapshot_page(tab)
+                page = await snapshot_page(
+                    tab, timeout=ctx.settings.normal_element_timeout_seconds,
+                )
                 pages.append(page)
                 from .linked import select_files
                 files.extend(select_files(page, item['url'], self.key)[1])
             except Exception as exc:
                 if self.is_browser_disconnect(exc):
                     raise
-                unresolved.append({'url': item['url'], 'error': type(exc).__name__})
+                unresolved.append({'url': item['url'], 'error': type(exc).__name__,
+                                   'cloudflare': page_diagnostics.get('pydoll_cloudflare_helper')})
             finally:
-                await asyncio.wait_for(tab.close(), timeout=3)
+                if helper is not None:
+                    await self.disarm_cloudflare_helper(tab, helper)
+                # Closing a tab whose CDP session already broke must not abort
+                # the remaining supplemental pages.
+                try:
+                    await asyncio.wait_for(tab.close(), timeout=3)
+                except Exception:
+                    pass
         figshare_ids = set()
         for page in pages:
             for item in page['links']:
@@ -67,7 +95,9 @@ class TaylorFrancisAdapter(LinkedPublisherAdapter):
                 elif ('supplement' in item.get('text', '').lower()
                       and parsed.hostname != urlparse(article_url).hostname):
                     unresolved.append({'url': url, 'error': 'external_supplement_reference'})
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=30, follow_redirects=True, trust_env=env_proxy_usable(),
+        ) as client:
             for article_id in sorted(figshare_ids):
                 api_url = f'https://api.figshare.com/v2/articles/{article_id}'
                 try:

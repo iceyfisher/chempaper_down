@@ -75,18 +75,23 @@ class BrowserWorker:
         *,
         persistent_profile: bool = False,
         headless: bool = True,
+        profile_key: str | None = None,
     ):
         self.worker_id = worker_id
         self.settings = settings
         self.staging_dir = settings.download_root / "_staging" / f"doi_process_{os.getpid()}"
         self.staging_dir.mkdir(parents=True, exist_ok=True)
-        # CNKI keeps an anti-bot cookie per profile; a persistent profile lets a
-        # once-solved CAPTCHA carry over to later searches.
-        self.profile_dir = (
-            settings.download_root / "_browser_profile"
-            if persistent_profile
-            else None
-        )
+        # A solved CAPTCHA or Cloudflare clearance is stored as a cookie in the
+        # profile, so challenge-heavy publishers get their own persistent
+        # directory. CNKI keeps its legacy path to preserve already-solved
+        # slider cookies. Separate directories also mean concurrent workers on
+        # different publishers never fight over one --user-data-dir.
+        self.profile_key = profile_key
+        if persistent_profile:
+            base = settings.download_root / "_browser_profile"
+            self.profile_dir = base if profile_key == "CNKI" else base / (profile_key or "shared")
+        else:
+            self.profile_dir = None
         self.headless = headless
         self._edge_context = None
         self.browser = None
@@ -105,6 +110,20 @@ class BrowserWorker:
 
     async def start(self) -> "BrowserWorker":
         self.clear_staging()
+        try:
+            await self._launch()
+        except Exception:
+            if self.profile_dir is None:
+                raise
+            # Two workers on the same publisher can race for the profile's
+            # user-data-dir lock (Edge refuses to start). Retry with a
+            # throwaway profile instead of failing the DOI outright.
+            await asyncio.to_thread(_kill_descendants_sync)
+            self.profile_dir = None
+            await self._launch()
+        return self
+
+    async def _launch(self) -> None:
         options = ChromiumOptions()
         options.headless = self.headless
         if self.profile_dir is not None:
@@ -117,7 +136,6 @@ class BrowserWorker:
         self._edge_context = Edge(options=options)
         self.browser = await self._edge_context.__aenter__()
         self.main_tab = await self.browser.start()
-        return self
 
     async def close_extra_tabs(self) -> None:
         if not self.browser or not self.main_tab:

@@ -5,6 +5,8 @@ import asyncio
 import json
 from urllib.parse import urljoin, urlparse
 
+from pydoll.exceptions import CommandExecutionTimeout
+
 from .base import PublisherAdapter
 from ..download import (
     DownloadArtifact, _unwrap_script_result, blob_download,
@@ -36,6 +38,13 @@ def unique_links(items):
     return result
 
 
+def _mdpi_si_path(path):
+    """MDPI SI files live at /article/<doi-path>/s1, /s2, ... or /supm."""
+
+    last = path.rstrip('/').rsplit('/', 1)[-1]
+    return (last.startswith('s') and last[1:].isdigit()) or last.startswith('supm')
+
+
 def select_files(snapshot, base_url, publisher):
     links = unique_links([
         {**item, 'url': urljoin(base_url, item['url'])}
@@ -44,30 +53,89 @@ def select_files(snapshot, base_url, publisher):
     pdfs = [{'url': urljoin(base_url, m['value']), 'text': 'PDF'}
             for m in snapshot.get('metas', [])
             if m['name'] == 'citation_pdf_url' and m.get('value')]
+    if publisher == 'APS':
+        # APS injects a stale http://link.aps.org/pdf/... meta that browsers
+        # refuse as mixed content; derive the current URL from the article
+        # page instead (journals.aps.org/<journal>/abstract/<doi>).
+        pdfs = [p for p in pdfs if 'link.aps.org' not in p['url']]
+        if base_url and '/abstract/' in base_url:
+            pdfs.insert(0, {'url': base_url.replace('/abstract/', '/pdf/'),
+                            'text': 'PDF'})
     si = []
     for item in links:
         path = urlparse(item['url']).path.lower()
         if ('/article-pdf/' in path or '/doi/pdf/' in path
-                or '/articlepdf/' in path):
+                or '/articlepdf/' in path or '/pdf/' in path and publisher == 'APS'
+                or (publisher == 'OPTICA' and path.endswith('.pdf'))):
             pdfs.append(item)
         if (item.get('type') == 'dataSupplementDoc'
                 or '/article-supplement/' in path
                 or '/suppl_file/' in path
-                or (publisher == 'RSC' and '/suppdata/' in path)):
+                or (publisher == 'RSC' and '/suppdata/' in path)
+                or (publisher == 'TAYLOR' and '/action/downloadsupplement' in path)
+                or (publisher == 'MDPI' and _mdpi_si_path(path))
+                or (publisher == 'IOP' and '/supplementary' in path)
+                or (publisher == 'APS' and '/supplemental' in path)):
             si.append(item)
     return unique_links(pdfs), unique_links(si)
 
 
-async def snapshot_page(tab):
-    raw = await asyncio.wait_for(
-        tab.execute_script(SNAPSHOT, return_by_value=True), timeout=10,
+def _has_article_markers(snapshot):
+    """True when the snapshot already exposes the elements discovery depends on."""
+
+    metas = snapshot.get('metas') or []
+    if any(m.get('name') == 'citation_pdf_url' and m.get('value') for m in metas):
+        return True
+    return any(
+        '/article-pdf/' in (item.get('url') or '') or '/doi/pdf/' in (item.get('url') or '')
+        for item in snapshot.get('links') or []
     )
-    value = _unwrap_script_result(raw)
-    if not isinstance(value, dict) or not isinstance(value.get('links'), list):
-        raise ValueError('Article link scan returned an invalid response')
-    if value.get('ready_state', 'complete') != 'complete':
-        raise ValueError('Page is still loading; link scan is not complete')
-    return value
+
+
+async def snapshot_page(tab, *, timeout: float = 0.0):
+    """Snapshot article links once the document has finished loading.
+
+    A publisher that redirects through a challenge can be reachable — the
+    article DOM markers are already there — while subresources are still in
+    flight. Scanning that intermediate state can miss late-rendered links, so
+    poll until ``readyState`` is ``complete`` within *timeout*. A page that is
+    still executing challenge JavaScript can also swallow the CDP call itself;
+    that transient timeout is retried, not treated as a failed download.
+    """
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, timeout)
+    while True:
+        try:
+            raw = await asyncio.wait_for(
+                tab.execute_script(SNAPSHOT, return_by_value=True), timeout=10,
+            )
+            value = _unwrap_script_result(raw)
+            if not isinstance(value, dict) or not isinstance(value.get('links'), list):
+                raise ValueError('Article link scan returned an invalid response')
+            state = value.get('ready_state', 'complete')
+            if state == 'complete':
+                return value
+            if loop.time() >= deadline:
+                # Some publishers keep long-polling subresources pending forever.
+                # 'interactive' still means the document tree is fully parsed and
+                # the caller already verified the article DOM markers; only
+                # 'loading' is too early to enumerate links reliably.
+                if state == 'interactive':
+                    return value
+                # RSC re-navigates while the article DOM is already present, so
+                # readyState can fall back to 'loading' and never settle. Accept
+                # the snapshot when the markers discovery depends on are there.
+                if _has_article_markers(value):
+                    return value
+                raise ValueError(
+                    'Page is still loading; link scan is not complete '
+                    f"(readyState={state!r})"
+                )
+        except (TimeoutError, CommandExecutionTimeout) as exc:
+            if loop.time() >= deadline:
+                raise ValueError(f'Article link scan did not complete: {exc!r}') from exc
+        await asyncio.sleep(0.5)
 
 
 async def download_validated(ctx, url, target, text='', *, paper=False):
@@ -115,12 +183,18 @@ class LinkedPublisherAdapter(PublisherAdapter):
     fallback_journals = {}
 
     async def prepare_article(self, ctx):
-        # Reuse the established refresh/helper/post-challenge wait sequence.
+        # Reuse the established helper/post-challenge wait sequence.
         # Reserve at least a quarter of the DOI budget for actual downloads.
         budget = max(10, ctx.settings.article_timeout_seconds * 0.75)
+        # A page whose challenge never resolves can wedge the CDP connection:
+        # every later command then burns Pydoll's 60s command timeout. Cap each
+        # attempt so the retry still fits and the DOI fails cleanly instead of
+        # being killed by the parent's hard timeout.
+        attempt_cap = max(45, ctx.settings.article_timeout_seconds * 0.25)
         deadline = asyncio.get_running_loop().time() + budget
         attempts = []
         ctx.navigation_diagnostics['navigation_budget_seconds'] = budget
+        ctx.navigation_diagnostics['navigation_attempt_cap_seconds'] = attempt_cap
         ctx.navigation_diagnostics['navigation_attempts'] = attempts
         for attempt in range(2):
             remaining = deadline - asyncio.get_running_loop().time()
@@ -130,7 +204,7 @@ class LinkedPublisherAdapter(PublisherAdapter):
             record = {'attempt': attempt + 1}
             attempts.append(record)
             try:
-                async with asyncio.timeout(remaining):
+                async with asyncio.timeout(min(remaining, attempt_cap)):
                     url = await self.navigate(ctx, cloudflare=True)
                     # Inspect access after the post-helper DOM wait has finished.
                     ready = ctx.navigation_diagnostics.get('article_dom_after_cloudflare_helper')
@@ -182,7 +256,9 @@ class LinkedPublisherAdapter(PublisherAdapter):
                                       else 'article_unavailable')
             return result
         try:
-            snapshot = await snapshot_page(ctx.tab)
+            snapshot = await snapshot_page(
+                ctx.tab, timeout=ctx.settings.normal_element_timeout_seconds,
+            )
             result.title = snapshot.get('title')
             for part in urlparse(article_url).path.lower().split('/'):
                 if part in self.fallback_journals:
@@ -200,7 +276,9 @@ class LinkedPublisherAdapter(PublisherAdapter):
                         await asyncio.wait_for(tab.go_to(reader['url']), ctx.settings.navigation_timeout_seconds)
                         if await self.access_issue(tab):
                             continue
-                        page = await snapshot_page(tab)
+                        page = await snapshot_page(
+                            tab, timeout=ctx.settings.normal_element_timeout_seconds,
+                        )
                         pdfs.extend(select_files(page, reader['url'], self.key)[0])
                     finally:
                         await asyncio.wait_for(tab.close(), timeout=3)

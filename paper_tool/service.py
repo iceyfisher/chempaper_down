@@ -183,9 +183,13 @@ class DownloadService:
 
         existing_paper = find_existing_paper(self.settings.download_root, doi)
         previous_manifest = load_article_manifest(self.settings.download_root, doi)
+        worker_settings = self.settings.to_worker_payload()
+        # The child derives its navigation budget from this value, so hand it the
+        # per-publisher budget instead of the generic default.
+        worker_settings["article_timeout_seconds"] = self.settings.article_timeout_for_doi(doi)
         request_payload = {
             "doi": doi,
-            "settings": self.settings.to_worker_payload(),
+            "settings": worker_settings,
             "resume_si": existing_paper is not None,
             "existing_paper": str(existing_paper) if existing_paper else None,
             "previous_manifest": previous_manifest,

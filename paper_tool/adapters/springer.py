@@ -188,7 +188,17 @@ class SpringerAdapter(PublisherAdapter):
                 ctx.worker, pdf_url, target,
                 timeout=min(ctx.settings.native_download_timeout_seconds, 45),
             )
-            result.paper = self.file_result("paper", path, pdf_url, "native_navigation", extension=".pdf")
+            method = "native_navigation"
+            if path is None:
+                # Nature-branded pages sometimes render the PDF inline instead
+                # of triggering Chromium's download manager; fetch it as a blob
+                # from the article tab which already holds the session cookies.
+                path = await blob_download(
+                    ctx.tab, ctx.worker.staging_dir, pdf_url, target,
+                    ctx.settings.blob_download_timeout_seconds,
+                )
+                method = "fetch_blob"
+            result.paper = self.file_result("paper", path, pdf_url, method, extension=".pdf")
 
         if not ctx.want_si:
             result.diagnostics["si_scan_complete"] = True

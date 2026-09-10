@@ -698,7 +698,9 @@ async def run_search(query: str, settings: Settings, timeout: float) -> dict:
     # CNKI gates headless sessions with a slider captcha far more aggressively;
     # a persistent headful profile passes much more often and reuses the solved
     # anti-bot cookie across searches.
-    worker = BrowserWorker(1, settings, persistent_profile=True, headless=False)
+    worker = BrowserWorker(
+        1, settings, persistent_profile=True, headless=False, profile_key="CNKI",
+    )
     await worker.start()
     try:
         rows, attempts = await search_on_tab(

@@ -154,7 +154,8 @@ class WileyAdapter(PublisherAdapter):
 
     @classmethod
     def matches_doi(cls, doi: str) -> bool:
-        return doi.startswith("10.1002/")
+        # 10.1049 (IET) is hosted on the same Wiley Online Library platform.
+        return doi.startswith(("10.1002/", "10.1049/"))
 
     async def _wait_reader(self, ctx: AdapterContext, old_ids: set[str]):
         loop = asyncio.get_running_loop()

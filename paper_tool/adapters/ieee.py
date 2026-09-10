@@ -4,8 +4,9 @@ import asyncio
 import re
 
 from .base import AdapterContext, PublisherAdapter
-from ..download import native_navigation_download
+from ..download import blob_download, native_navigation_download
 from ..models import ArticleResult
+from ..resources import infer_extension
 from ..storage import doi_to_filename
 
 
@@ -57,7 +58,8 @@ class IeeeAdapter(PublisherAdapter):
 
     @classmethod
     def matches_doi(cls, doi: str) -> bool:
-        return doi.startswith("10.1109/")
+        # 10.23919 is IEEE's newer conference prefix; both resolve into Xplore.
+        return doi.startswith(("10.1109/", "10.23919/"))
 
     async def _wait_metadata_and_stamp(self, ctx: AdapterContext, timeout: float) -> dict:
         """Poll until the SPA exposes xplGlobal metadata and the stamp anchor."""
@@ -144,17 +146,27 @@ class IeeeAdapter(PublisherAdapter):
 
         stamp_url = urljoin("https://ieeexplore.ieee.org/", stamp_href)
 
+        # Supplementary files, when present, hang off the article page's
+        # "Supplementary Files" section — anchors whose href or text say so.
+        # Collect them before the stamp navigation replaces the page.
+        si_links = await self._collect_supplementary_links(tab)
+
         doi_for_name = result.doi or ctx.doi
         target = paper_dir = None
         _, paper_dir, _si_dir = self.dirs(
             ctx, result.journal or "IEEE", result.year
         )
         target = paper_dir / f"{doi_to_filename(doi_for_name)}.pdf"
-        timeout = min(ctx.settings.native_download_timeout_seconds, 60)
+        # Conference PDFs are multi-megabyte; two parallel workers share the
+        # link, so allow a full minute before declaring the stamp download dead.
+        timeout = min(max(ctx.settings.native_download_timeout_seconds, 60), 90)
 
-        # The stamp page embeds the actual file in an iframe whose src points
-        # at ielx*.pdf (e.g. /ielx7/6287639/8948470/09144185.pdf?...). Extract
-        # it, download via a fresh tab, then step back to the article page.
+        # The stamp page embeds the actual file in an iframe. Xplore reshaped
+        # this over time: older articles point at ielx*.pdf, current ones at
+        # /stampPDF/getPDF.jsp?tp=&arnumber=<arn>, which itself redirects to
+        # the PDF file. NOTE: query each pattern separately — pydoll's
+        # iframe-crossing splitter misparses a comma list whose segments start
+        # with the `iframe` tag.
         pdf_url = None
         try:
             await asyncio.wait_for(
@@ -165,7 +177,15 @@ class IeeeAdapter(PublisherAdapter):
                 raise
         deadline = asyncio.get_running_loop().time() + 20
         while pdf_url is None and asyncio.get_running_loop().time() < deadline:
-            iframe = await tab.query('iframe[src*="ielx"]', timeout=3, raise_exc=False)
+            iframe = None
+            for selector in (
+                'iframe[src*="ielx"]',
+                'iframe[src*="getPDF.jsp"]',
+                'iframe[src*="/stampPDF/"]',
+            ):
+                iframe = await tab.query(selector, timeout=3, raise_exc=False)
+                if iframe:
+                    break
             if iframe:
                 src = iframe.get_attribute("src") or ""
                 if src:
@@ -198,9 +218,61 @@ class IeeeAdapter(PublisherAdapter):
                 "paper", path, stamp_url, method, extension=".pdf"
             )
 
-        # IEEE articles carry no supporting information by design.
+        # history.back() above restored the article page; fetch any
+        # supplementary files found there through the session that holds the
+        # campus entitlement.
+        for si_url, si_text in si_links:
+            ext = infer_extension(si_url, si_text)
+            _, _, si_dir = self.dirs(ctx, result.journal or "IEEE", result.year)
+            target = self.si_target(si_dir, doi_for_name, si_url, ext)
+            artifact = await blob_download(
+                tab, ctx.worker.staging_dir, si_url, target,
+                ctx.settings.blob_download_timeout_seconds, link_text=si_text,
+            )
+            result.si.append(
+                self.file_result("si", artifact, si_url, "ieee_supplementary",
+                                 extension=ext)
+            )
+        result.diagnostics["ieee_si_links"] = len(si_links)
         result.diagnostics["si_scan_complete"] = True
-        result.diagnostics["si_scan_strategy"] = "ieee_no_si_by_design"
+        result.diagnostics["si_scan_strategy"] = "ieee_supplementary_links"
+        return result
+
+    async def _collect_supplementary_links(self, tab) -> list[tuple[str, str]]:
+        try:
+            raw = await asyncio.wait_for(
+                tab.execute_script(
+                    """
+                    (() => {
+                      const hits = [];
+                      for (const a of document.querySelectorAll('a[href]')) {
+                        const text = (a.textContent || '').trim();
+                        const href = a.href || '';
+                        if (/supplement/i.test(text) || /supplement/i.test(href)) {
+                          hits.push({url: href, text: text.slice(0, 80)});
+                        }
+                      }
+                      return hits;
+                    })()
+                    """,
+                    return_by_value=True,
+                ),
+                timeout=10,
+            )
+        except Exception as exc:
+            if self.is_browser_disconnect(exc):
+                raise
+            return []
+        data = _unwrap_local(raw) or []
+        seen, result = set(), []
+        for item in data if isinstance(data, list) else []:
+            url = (item or {}).get("url") or ""
+            host = url.split("/")[2] if url.count("/") >= 2 else ""
+            if not host.endswith("ieee.org"):
+                continue  # supplementary files are served from ieee.org hosts
+            if url and url not in seen:
+                seen.add(url)
+                result.append((url, (item or {}).get("text") or ""))
         return result
 
 

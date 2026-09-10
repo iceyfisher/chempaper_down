@@ -49,6 +49,112 @@ def test_invalid_scan_raises():
         asyncio.run(snapshot_page(tab))
 
 
+def test_taylor_download_supplement_links():
+    from paper_tool.resources import infer_extension
+    snapshot = {'metas': [], 'links': [
+        {'url': 'https://www.tandfonline.com/action/downloadSupplement?doi=10.1080%2Fx&file=a_sm1.docx',
+         'text': 'Supplemental material'},
+        {'url': 'https://www.tandfonline.com/doi/suppl/10.1080/x?scroll=top', 'text': ''},
+    ]}
+    _, si = select_files(snapshot, 'https://www.tandfonline.com/doi/full/10.1080/x', 'TAYLOR')
+    assert len(si) == 1 and 'downloadSupplement' in si[0]['url']
+    assert infer_extension(si[0]['url']) == '.docx'
+    _, rsc_si = select_files(snapshot, 'https://pubs.rsc.org/article/x', 'RSC')
+    assert rsc_si == []
+
+
+def test_taylor_supplemental_page_uses_cloudflare_helper(monkeypatch):
+    from unittest.mock import MagicMock
+    page = {'metas': [], 'links': [
+        {'url': 'https://www.tandfonline.com/doi/suppl/10.1080/x?scroll=top', 'text': ''}]}
+    supplemental = {'title': 'Supplemental', 'metas': [], 'links': [
+        {'url': 'https://www.tandfonline.com/action/downloadSupplement?doi=10.1080%2Fx&file=a.docx',
+         'text': 'SI'}]}
+    tab = SimpleNamespace(go_to=AsyncMock(), close=AsyncMock())
+    ctx = SimpleNamespace(browser=SimpleNamespace(new_tab=AsyncMock(return_value=tab)),
+                          settings=Settings())
+    adapter = TaylorFrancisAdapter()
+    armed, ran = [], []
+
+    async def fake_arm(ctx, *, tab=None, diagnostics=None):
+        armed.append(tab)
+        return {'callback_id': 1, 'done': None}
+
+    async def fake_run(ctx, helper, *, tab=None, diagnostics=None):
+        ran.append(tab)
+
+    adapter.arm_cloudflare_helper = fake_arm
+    adapter.run_cloudflare_helper = fake_run
+    adapter.disarm_cloudflare_helper = AsyncMock()
+    adapter.access_issue = AsyncMock(return_value=None)
+    adapter.wait_for_article_dom = AsyncMock(return_value=True)
+    monkeypatch.setattr('paper_tool.adapters.taylor.snapshot_page',
+                        AsyncMock(return_value=supplemental))
+    client = SimpleNamespace(get=AsyncMock())
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=client)
+    context.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr('paper_tool.adapters.taylor.httpx.AsyncClient', lambda **kwargs: context)
+    links, complete, _ = asyncio.run(adapter.discover_si(
+        ctx, page, 'https://www.tandfonline.com/doi/full/10.1080/x'))
+    assert armed == [tab] and ran == [tab]
+    adapter.disarm_cloudflare_helper.assert_awaited_once()
+    assert complete and len(links) == 1
+    assert 'downloadSupplement' in links[0]['url']
+
+
+def test_snapshot_waits_for_full_load():
+    class Tab:
+        def __init__(self, states):
+            self.states = list(states)
+            self.calls = 0
+
+        async def execute_script(self, script, return_by_value=True):
+            self.calls += 1
+            state = self.states[min(self.calls - 1, len(self.states) - 1)]
+            return {'result': {'result': {'value': {'ready_state': state, 'links': [], 'metas': []}}}}
+
+    late = Tab(['interactive', 'complete'])
+    assert asyncio.run(snapshot_page(late, timeout=5))['ready_state'] == 'complete'
+    assert late.calls == 2
+    # A page that keeps long-polling subresources pending is still scannable.
+    stuck = Tab(['interactive'])
+    assert asyncio.run(snapshot_page(stuck, timeout=0.1))['ready_state'] == 'interactive'
+    assert stuck.calls == 2
+    early = Tab(['loading'])
+    import pytest
+    with pytest.raises(ValueError, match='still loading'):
+        asyncio.run(snapshot_page(early, timeout=0.1))
+
+    class MarkedTab(Tab):
+        async def execute_script(self, script, return_by_value=True):
+            self.calls += 1
+            return {'result': {'result': {'value': {
+                'ready_state': 'loading', 'links': [], 'metas': [
+                    {'name': 'citation_pdf_url', 'value': 'https://example.org/x.pdf'}]}}}}
+
+    marked = MarkedTab(['loading'])
+    assert asyncio.run(snapshot_page(marked, timeout=0.1))['ready_state'] == 'loading'
+
+
+def test_snapshot_retries_transient_command_timeout():
+    from pydoll.exceptions import CommandExecutionTimeout
+
+    class Tab:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute_script(self, script, return_by_value=True):
+            self.calls += 1
+            if self.calls == 1:
+                raise CommandExecutionTimeout('page still executing challenge script')
+            return {'result': {'result': {'value': {'ready_state': 'complete', 'links': [], 'metas': []}}}}
+
+    tab = Tab()
+    assert asyncio.run(snapshot_page(tab, timeout=5))['ready_state'] == 'complete'
+    assert tab.calls == 2
+
+
 def test_figshare_ids():
     assert figshare_article_id('https://tandf.figshare.com/articles/journal_contribution/title/12345') == '12345'
     assert figshare_article_id('https://evil.example/articles/12345') is None
@@ -97,15 +203,38 @@ def test_navigation_retries_exactly_once_without_browser():
     assert len(ctx.navigation_diagnostics['navigation_attempts']) == 2
 
 
-def test_restored_refresh_helper_and_full_post_wait():
+def test_cloudflare_helper_armed_before_navigation():
+    calls = []
+
     class Tab:
-        go_to = AsyncMock()
-        refresh = AsyncMock()
-        _bypass_cloudflare = AsyncMock()
+        page_events_enabled = False
+        handler = None
+
+        async def enable_page_events(self):
+            self.page_events_enabled = True
+            calls.append('enable_page_events')
+
+        async def on(self, event, callback, temporary=False):
+            calls.append(('on', event))
+            self.handler = callback
+            return 7
+
+        async def remove_callback(self, callback_id):
+            calls.append(('remove_callback', callback_id))
+
+        async def go_to(self, url):
+            calls.append('go_to')
+            await self.handler({'method': 'Page.loadEventFired'})
+
+        async def refresh(self):
+            calls.append('refresh')
 
         @property
         async def current_url(self):
             return 'https://pubs.acs.org/article/example'
+
+        async def _bypass_cloudflare(self, event, time_to_wait_captcha=5):
+            calls.append(('bypass', event, time_to_wait_captcha))
 
     tab = Tab()
     settings = Settings(article_timeout_seconds=360, cloudflare_timeout_seconds=60, settle_seconds=0)
@@ -115,11 +244,79 @@ def test_restored_refresh_helper_and_full_post_wait():
     adapter.access_issue = AsyncMock(return_value=None)
     url, issue = asyncio.run(adapter.prepare_article(ctx))
     assert issue is None and '/article/example' in url
-    tab.refresh.assert_awaited_once()
-    tab._bypass_cloudflare.assert_awaited_once_with({}, time_to_wait_captcha=60)
+    assert calls[:3] == ['enable_page_events', ('on', 'Page.loadEventFired'), 'go_to']
+    assert ('bypass', {'method': 'Page.loadEventFired'}, 60) in calls
+    assert 'refresh' not in calls
+    assert ('remove_callback', 7) in calls
     assert [call.kwargs['timeout'] for call in adapter.wait_for_article_dom.await_args_list] == [3, 60]
+    assert ctx.navigation_diagnostics['pydoll_cloudflare_helper'] == 'armed'
+    assert ctx.navigation_diagnostics['article_dom_before_cloudflare_helper'] is False
+    assert ctx.navigation_diagnostics['article_dom_after_cloudflare_helper'] is True
     assert len(ctx.navigation_diagnostics['navigation_attempts']) == 1
     assert ctx.navigation_diagnostics['navigation_budget_seconds'] == 270
+    assert ctx.navigation_diagnostics['navigation_attempt_cap_seconds'] == 90
+
+
+def test_downloads_are_headful_unless_opted_out(monkeypatch):
+    from dataclasses import replace
+    settings = Settings.from_env('downloads')
+    assert settings.headless_publishers == frozenset()
+    assert settings.to_worker_payload()['headless_publishers'] == []
+    monkeypatch.setenv('PAPER_TOOL_HEADLESS_PUBLISHERS', 'springer, wiley')
+    assert Settings.from_env('downloads').headless_publishers == frozenset({'SPRINGER', 'WILEY'})
+    opted_out = replace(settings, headless_publishers=frozenset({'ACS'}))
+    assert Settings.from_worker_payload(opted_out.to_worker_payload()).headless_publishers == frozenset({'ACS'})
+
+
+def test_new_publisher_routing():
+    assert get_adapter('10.1038/s41928-021-00599-5').key == 'SPRINGER'
+    assert get_adapter('10.3390/mi14112044').key == 'MDPI'
+    assert get_adapter('10.1088/1361-6463/aaaf9d').key == 'IOP'
+    assert get_adapter('10.7567/1882-0786/ab1b19').key == 'IOP'
+    assert get_adapter('10.1103/PhysRevApplied.22.024075').key == 'APS'
+    assert get_adapter('10.1364/OE.15.015964').key == 'OPTICA'
+    assert get_adapter('10.1049/el.2014.1131').key == 'WILEY'
+    assert get_adapter('10.23919/ISPSD50666.2021.9452259').key == 'IEEE'
+    assert get_adapter('10.1109/TED.2023.3346369').key == 'IEEE'
+
+
+def test_new_publisher_si_patterns():
+    snapshot = {'metas': [], 'links': [
+        # MDPI SI
+        {'url': 'https://www.mdpi.com/article/10.3390/mi14112044/s1', 'text': 'Supplementary'},
+        # IOP supplementary
+        {'url': 'https://iopscience.iop.org/article/10.1088/x/supplementary', 'text': 'Supplementary data'},
+        # APS supplemental
+        {'url': 'https://journals.aps.org/prapplied/supplemental/10.1103/x', 'text': 'Supplemental'},
+    ]}
+    from paper_tool.adapters.linked import select_files as sf
+    assert len(sf(snapshot, 'https://www.mdpi.com/x', 'MDPI')[1]) == 1
+    assert len(sf(snapshot, 'https://iopscience.iop.org/x', 'IOP')[1]) == 1
+    assert len(sf(snapshot, 'https://journals.aps.org/x', 'APS')[1]) == 1
+    # No cross-publisher leakage: the other publishers see no SI here.
+    assert sf(snapshot, 'https://pubs.acs.org/x', 'ACS')[1] == []
+
+
+def test_cloudflare_publishers_get_larger_budget():
+    settings = Settings()
+    for doi in ('10.1021/acsomega.5c13377', '10.1039/c6ra08946a',
+                '10.1080/07366299.2015.1087209', '10.1063/5.0061354',
+                '10.1126/science.abc1234'):
+        assert settings.timeout_for_doi(doi) == 360
+        assert settings.article_timeout_for_doi(doi) == 360
+    assert settings.article_timeout_for_doi('10.1007/s10967-017-5317-8') == 120
+    assert settings.timeout_for_doi('10.1002/anie.202000001') == 600
+    payload = settings.to_worker_payload()
+    assert Settings.from_worker_payload(payload).cloudflare_article_timeout_seconds == 360
+
+
+def test_worker_budget_stays_below_parent_kill():
+    from paper_tool.worker_main import worker_budget_seconds
+    settings = Settings()
+    assert worker_budget_seconds(settings, '10.1021/x') == 324
+    assert worker_budget_seconds(settings, '10.1002/x') == 540
+    for doi in ('10.1007/x', '10.1021/x', '10.1002/x'):
+        assert worker_budget_seconds(settings, doi) < settings.timeout_for_doi(doi)
 
 
 def test_extended_cloudflare_setting_survives_worker_payload():

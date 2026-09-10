@@ -18,15 +18,20 @@
 | AIP Publishing | ✅ | ✅ | |
 | AAAS / Science | ✅ | ✅ | |
 | Royal Society of Chemistry | ✅ | ✅ | |
-| Taylor & Francis | ✅ | ✅（如有） | `10.1080/*`；Supplemental / 关联 Figshare，待校园网实测 |
-| Wiley | ✅ | ✅ | 自动使用 600 秒整篇预算 |
-| Springer Nature / SpringerLink | ✅ | ✅ | |
+| Taylor & Francis | ✅ | ✅（如有） | `10.1080/*`；Supplemental / 关联 Figshare |
+| Wiley（含 IET `10.1049`） | ✅ | ✅ | 自动使用 600 秒整篇预算 |
+| Springer Nature / Nature（`10.1038`） | ✅ | ✅ | 无权限时自动尝试绿色 OA 仓库副本 |
 | Elsevier / ScienceDirect | ✅ 官方 API | ✅ 公开 CDN | 需要配置 `ELSEVIER_API_KEY` |
-| **IEEE Xplore** | ✅ | ❌ 无 SI | stamp.jsp → ielx*.pdf；下载后台运行，验证受阻可能失败 |
+| **IEEE Xplore**（含 `10.23919`） | ✅ | ✅（如有） | stamp 页 iframe（ielx/getPDF.jsp）→ 直接下载 |
+| MDPI（`10.3390`） | ✅ | ✅（如有） | 开放获取，`/article/<doi>/s<n>` SI |
+| IOP（`10.1088`、`10.7567`） | ✅ | ✅（如有） | Radware/hCaptcha 可能需要人工在有头窗口过一次 |
+| SSDD 会议（`10.7567/SSDM.*`，Confit） | ✅ | ❌ 无 SI | pub.confit.atlas.jp 页内下载 |
+| APS（`10.1103`） | ✅ | ✅（如有） | Cloudflare 自动通过；从文章页推导 PDF 链接 |
+| Optica（`10.1364`） | ✅ | ✅（如有） | 文本验证码可能需要人工在有头窗口过一次 |
 | **CNKI 中国知网** | ✅ | ❌ 无 SI | 检索中文文献，提取 DOI 与中文标题，下载正文 PDF |
-| **OpenAlex** | 🔍 仅检索 | — | 免费开源学术数据库，标题 → DOI 解析 |
+| **OpenAlex** | 🔍 仅检索 | — | 免费开源学术数据库，标题 → DOI 解析；无权限正文兜底查 OA 副本 |
 
-无法识别的 DOI 会自动兜底路由到知网检索。SI 支持识别 PDF、ZIP、Office 文档、图片、视频等格式。同一 DOI 重复提交会自动跳过；只缺部分附件时保留已下载内容，只补缺失部分。
+无法识别的 DOI 会自动兜底路由到知网检索。SI 支持识别 PDF、ZIP、Office 文档、图片、视频等格式。同一 DOI 重复提交会自动跳过；只缺部分附件时保留已下载内容，只补缺失部分。正文获取失败时自动查询 OpenAlex 的开放仓库副本（绿色 OA），直接下载或经浏览器通过反爬后下载。
 
 校园网手动验证：`python test.py --publisher rsc`、`python test.py --publisher acs`、
 `python test.py --publisher taylor`。也可使用 `--doi <DOI>` 或 `--all`。
@@ -335,7 +340,7 @@ http://127.0.0.1:8765/mcp
 | `get_job_status(job_id)` | 轮询已提交的任务 |
 | `list_publishers()` | 当前支持的出版社列表 |
 
-**注意**：下载任务统一无头运行，不弹出 Edge 窗口；网站要求人工验证时可能失败。`search_cnki` 独立检索入口保留原有行为。
+**注意**：下载默认以**有头**方式运行（会弹出 Edge 窗口），因为 ACS/RSC/Taylor 的 Cloudflare 挑战、IEEE 的 Error 418 和知网的滑块验证都会拦截无头会话。如需让某个出版社无头运行，把它加进 `PAPER_TOOL_HEADLESS_PUBLISHERS`（逗号分隔的适配器名，如 `SPRINGER,WILEY`）。`search_cnki` 独立检索入口保留原有行为。
 
 ## 八、归档目录规则
 
@@ -372,11 +377,14 @@ downloads/
 | `PAPER_TOOL_ARTICLE_TIMEOUT` | `120` | 常规单篇硬超时（秒） |
 | `PAPER_TOOL_WILEY_TIMEOUT` | `600` | Wiley 单篇预算 |
 | `PAPER_TOOL_ELSEVIER_TIMEOUT` | `600` | Elsevier 单篇预算 |
+| `PAPER_TOOL_CLOUDFLARE_ARTICLE_TIMEOUT` | `360` | ACS / RSC / T&F / AIP / APS / MDPI 单篇预算（含 Cloudflare 挑战处理与重试） |
+| `PAPER_TOOL_MANUAL_CAPTCHA_WAIT` | `180` | IOP hCaptcha / Optica 验证码等待人工在有头窗口处理的时间（秒，0–600） |
 | `PAPER_TOOL_NAV_TIMEOUT` | `30` | 页面导航软超时 |
 | `PAPER_TOOL_NATIVE_TIMEOUT` | `35` | 原生下载等待 |
 | `PAPER_TOOL_BLOB_TIMEOUT` | `75` | 页内 fetch/Blob 下载等待 |
 | `PAPER_TOOL_CLOUDFLARE_TIMEOUT` | `60` | Pydoll 挑战处理和验证后页面等待各自的上限；可设 3–120 秒 |
 | `PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER` | `1` | 是否启用 Pydoll Cloudflare 助手 |
+| `PAPER_TOOL_HEADLESS_PUBLISHERS` | 空（全部有头） | 逗号分隔的适配器名（`ACS`/`RSC`/`TAYLOR`/`WILEY`/`SPRINGER`/`ELSEVIER`/`AAAS`/`AIP`/`IEEE`/`CNKI`），列出的出版社改为无头运行 |
 | `PAPER_TOOL_KILL_GRACE` | `5` | 子进程终止宽限（秒） |
 | `PAPER_TOOL_CNKI_MANUAL_WAIT` | `120` | 知网滑块验证自动失败后等待人工滑动的时间（秒） |
 
@@ -430,8 +438,8 @@ Automated article PDF + Supporting Information (SI) downloader over campus-netwo
 
 | Source | PDF | SI | Notes |
 |---|---|---|---|
-| ACS / AIP / AAAS / RSC / Wiley / Springer | ✅ | ✅ | Browser adapters, Cloudflare-aware |
-| IEEE Xplore | ✅ | ❌ | headless download; access challenges may prevent retrieval |
+| ACS / AIP / AAAS / RSC / Wiley / Springer | ✅ | ✅ | Browser adapters, Cloudflare-aware, headful window by default |
+| IEEE Xplore | ✅ | ✅ if present | headful window; stamp iframe (ielx/getPDF.jsp) direct download |
 | Taylor & Francis | ✅ | ✅ if present | `10.1080/*`, Supplemental and linked Figshare files; campus-network verification pending |
 | Elsevier | ✅ official API | ✅ public CDN | requires `ELSEVIER_API_KEY` |
 | CNKI | ✅ | ❌ | DOI + Chinese title extraction, main PDF only |

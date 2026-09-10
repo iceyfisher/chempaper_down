@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +11,8 @@ from urllib.parse import urlparse
 from .browser import BrowserWorker
 from .resources import infer_extension, obvious_error_payload, resolve_download_extension
 from .storage import sha256_file, validate_file
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -152,8 +155,8 @@ async def blob_download(
                 user_gesture=True,
                 timeout=int(timeout * 1000),
             )
-        source = Path(download.file_path)
-        if source.exists():
+        source = Path(download.file_path) if download.file_path else None
+        if source and source.exists():
             meta = _unwrap_script_result(raw)
             if not isinstance(meta, dict):
                 meta = {}
@@ -175,6 +178,7 @@ async def blob_download(
                 or infer_extension(original_filename or "") == ".json"
             )
             if (mime in {"application/json", "text/json"} or looks_json) and not json_was_declared:
+                logger.info("blob_download rejected %s: json payload", url)
                 return None
             error = obvious_error_payload(
                 head,
@@ -182,9 +186,11 @@ async def blob_download(
                 extension=extension,
             )
             if error:
+                logger.info("blob_download rejected %s: %s", url, error)
                 return None
-            valid, _ = validate_file(source, extension)
+            valid, reason = validate_file(source, extension)
             if not valid:
+                logger.info("blob_download rejected %s: %s", url, reason)
                 return None
 
             final_target = target.with_suffix(extension)
@@ -207,7 +213,8 @@ async def blob_download(
                 content_disposition=content_disposition or None,
                 response_headers=response_headers,
             )
-    except Exception:
+    except Exception as exc:
+        logger.info("blob_download failed for %s: %r", url, exc)
         return None
     return None
 

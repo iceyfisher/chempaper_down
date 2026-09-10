@@ -11,6 +11,26 @@ def _load_runtime_env() -> None:
     load_dotenv(Path.cwd() / ".env", override=False)
 
 
+# Publishers served through the Pydoll Cloudflare challenge flow.
+CLOUDFLARE_DOI_PREFIXES = (
+    "10.1021/",  # ACS
+    "10.1039/",  # RSC
+    "10.1080/",  # Taylor & Francis
+    "10.1063/",  # AIP
+    "10.1103/",  # APS
+    "10.1126/",  # AAAS
+    "10.3390/",  # MDPI (Cloudflare-gated even though content is open access)
+)
+
+# Publishers whose challenge may need a human in the visible browser window
+# (hCaptcha on IOP, Optica's text captcha); their budget must cover the wait.
+MANUAL_CHALLENGE_DOI_PREFIXES = (
+    "10.1088/",  # IOP
+    "10.7567/",  # JJAP (IOP)
+    "10.1364/",  # Optica
+)
+
+
 @dataclass(slots=True)
 class Settings:
     """Runtime settings shared by API, parent scheduler and DOI subprocesses."""
@@ -22,6 +42,10 @@ class Settings:
     article_timeout_seconds: int = 120
     wiley_article_timeout_seconds: int = 600
     elsevier_article_timeout_seconds: int = 600
+    # ACS/RSC/Taylor & Francis sit behind Cloudflare managed challenges, which
+    # can take a minute or more to clear. The default 120s leaves too little
+    # navigation budget for the challenge plus a retry.
+    cloudflare_article_timeout_seconds: int = 360
     subprocess_kill_grace_seconds: int = 5
 
     # In-child soft operation limits. The parent timeout is authoritative.
@@ -30,6 +54,9 @@ class Settings:
     native_download_timeout_seconds: int = 35
     blob_download_timeout_seconds: int = 75
     cloudflare_timeout_seconds: int = 60
+    # Wait window for the operator to manually clear a captcha (hCaptcha on
+    # IOP, Optica's text captcha) in the visible download browser.
+    manual_captcha_wait_seconds: int = 180
     settle_seconds: float = 1.2
 
     max_concurrency_hard_limit: int = 4
@@ -38,6 +65,12 @@ class Settings:
     # Pydoll's helper runs only for adapters that opt into Cloudflare handling.
     # The per-DOI subprocess boundary contains any browser/CDP stall.
     enable_pydoll_cloudflare_helper: bool = True
+
+    # Every download worker opens a visible Edge window by default: headless
+    # sessions are blocked by Cloudflare managed challenges (ACS/RSC/Taylor),
+    # IEEE's Error 418, and CNKI's slider CAPTCHA. List adapter keys here to run
+    # those publishers windowless instead.
+    headless_publishers: frozenset[str] = frozenset()
 
     @classmethod
     def from_env(cls, download_root: str | Path | None = None) -> "Settings":
@@ -51,16 +84,27 @@ class Settings:
             elsevier_article_timeout_seconds=int(
                 os.getenv("PAPER_TOOL_ELSEVIER_TIMEOUT", "600")
             ),
+            cloudflare_article_timeout_seconds=int(
+                os.getenv("PAPER_TOOL_CLOUDFLARE_ARTICLE_TIMEOUT", "360")
+            ),
             subprocess_kill_grace_seconds=int(os.getenv("PAPER_TOOL_KILL_GRACE", "5")),
             navigation_timeout_seconds=int(os.getenv("PAPER_TOOL_NAV_TIMEOUT", "30")),
             normal_element_timeout_seconds=int(os.getenv("PAPER_TOOL_ELEMENT_TIMEOUT", "18")),
             native_download_timeout_seconds=int(os.getenv("PAPER_TOOL_NATIVE_TIMEOUT", "35")),
             blob_download_timeout_seconds=int(os.getenv("PAPER_TOOL_BLOB_TIMEOUT", "75")),
             cloudflare_timeout_seconds=int(os.getenv("PAPER_TOOL_CLOUDFLARE_TIMEOUT", "60")),
+            manual_captcha_wait_seconds=int(
+                os.getenv("PAPER_TOOL_MANUAL_CAPTCHA_WAIT", "180")
+            ),
             elsevier_api_key=os.getenv("ELSEVIER_API_KEY") or None,
             enable_pydoll_cloudflare_helper=(
                 os.getenv("PAPER_TOOL_ENABLE_CLOUDFLARE_HELPER", "1").strip().lower()
                 in {"1", "true", "yes", "on"}
+            ),
+            headless_publishers=frozenset(
+                key.strip().upper()
+                for key in os.getenv("PAPER_TOOL_HEADLESS_PUBLISHERS", "").split(",")
+                if key.strip()
             ),
         ).normalized()
 
@@ -80,7 +124,14 @@ class Settings:
                 article_timeout,
                 min(int(self.elsevier_article_timeout_seconds), 600),
             ),
+            cloudflare_article_timeout_seconds=max(
+                article_timeout,
+                min(int(self.cloudflare_article_timeout_seconds), 600),
+            ),
             subprocess_kill_grace_seconds=max(1, min(int(self.subprocess_kill_grace_seconds), 30)),
+            manual_captcha_wait_seconds=max(
+                0, min(int(self.manual_captcha_wait_seconds), 600)
+            ),
             navigation_timeout_seconds=max(5, min(int(self.navigation_timeout_seconds), article_timeout)),
             normal_element_timeout_seconds=max(2, min(int(self.normal_element_timeout_seconds), article_timeout)),
             native_download_timeout_seconds=max(5, min(int(self.native_download_timeout_seconds), article_timeout)),
@@ -110,13 +161,16 @@ class Settings:
             "article_timeout_seconds": self.article_timeout_seconds,
             "wiley_article_timeout_seconds": self.wiley_article_timeout_seconds,
             "elsevier_article_timeout_seconds": self.elsevier_article_timeout_seconds,
+            "cloudflare_article_timeout_seconds": self.cloudflare_article_timeout_seconds,
             "navigation_timeout_seconds": self.navigation_timeout_seconds,
             "normal_element_timeout_seconds": self.normal_element_timeout_seconds,
             "native_download_timeout_seconds": self.native_download_timeout_seconds,
             "blob_download_timeout_seconds": self.blob_download_timeout_seconds,
             "cloudflare_timeout_seconds": self.cloudflare_timeout_seconds,
+            "manual_captcha_wait_seconds": self.manual_captcha_wait_seconds,
             "settle_seconds": self.settle_seconds,
             "enable_pydoll_cloudflare_helper": self.enable_pydoll_cloudflare_helper,
+            "headless_publishers": sorted(self.headless_publishers),
         }
 
     @classmethod
@@ -130,21 +184,44 @@ class Settings:
             elsevier_article_timeout_seconds=int(
                 payload.get("elsevier_article_timeout_seconds", 600)
             ),
+            cloudflare_article_timeout_seconds=int(
+                payload.get("cloudflare_article_timeout_seconds", 360)
+            ),
             navigation_timeout_seconds=int(payload.get("navigation_timeout_seconds", 30)),
             normal_element_timeout_seconds=int(payload.get("normal_element_timeout_seconds", 18)),
             native_download_timeout_seconds=int(payload.get("native_download_timeout_seconds", 35)),
             blob_download_timeout_seconds=int(payload.get("blob_download_timeout_seconds", 75)),
             cloudflare_timeout_seconds=int(payload.get("cloudflare_timeout_seconds", 60)),
+            manual_captcha_wait_seconds=int(
+                payload.get("manual_captcha_wait_seconds", 180)
+            ),
             settle_seconds=float(payload.get("settle_seconds", 1.2)),
             # The child inherits the server environment. Never serialize API keys
             # into downloads/_worker_runs/request.json.
             elsevier_api_key=os.getenv("ELSEVIER_API_KEY") or None,
             enable_pydoll_cloudflare_helper=bool(payload.get("enable_pydoll_cloudflare_helper", False)),
+            headless_publishers=frozenset(
+                str(key).upper() for key in payload.get("headless_publishers", ())
+            ),
         ).normalized()
 
     def timeout_for_doi(self, doi: str) -> int:
-        if doi.lower().startswith("10.1002/"):
+        lowered = doi.lower()
+        if lowered.startswith("10.1002/") or lowered.startswith("10.1049/"):
             return max(self.article_timeout_seconds, self.wiley_article_timeout_seconds)
-        if doi.lower().startswith("10.1016/"):
+        if lowered.startswith("10.1016/"):
             return max(self.article_timeout_seconds, self.elsevier_article_timeout_seconds)
+        if lowered.startswith(CLOUDFLARE_DOI_PREFIXES):
+            return max(self.article_timeout_seconds, self.cloudflare_article_timeout_seconds)
+        if lowered.startswith(MANUAL_CHALLENGE_DOI_PREFIXES):
+            # The budget must cover the operator solving a captcha by hand.
+            return max(
+                self.article_timeout_seconds,
+                self.manual_captcha_wait_seconds + 240,
+            )
         return self.article_timeout_seconds
+
+    def article_timeout_for_doi(self, doi: str) -> int:
+        """Budget handed to the DOI worker; challenge publishers need more room."""
+
+        return self.timeout_for_doi(doi)

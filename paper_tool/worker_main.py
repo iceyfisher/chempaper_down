@@ -28,6 +28,18 @@ def event(stage: str, message: str, **extra) -> None:
     print("PAPER_TOOL_EVENT " + json.dumps(payload, ensure_ascii=False), flush=True)
 
 
+def worker_budget_seconds(settings: Settings, doi: str) -> int:
+    """Soft child-side budget, kept below the parent's hard kill.
+
+    A wedged publisher session (Cloudflare interstitial that never clears) makes
+    every later CDP command burn its own timeout. Bounding the adapter run here
+    turns that into a normal failed result with diagnostics instead of the
+    parent killing the process tree with no child-side record.
+    """
+
+    return max(30, int(settings.timeout_for_doi(doi) * 0.9))
+
+
 def finalize_status(result: ArticleResult) -> ItemStatus:
     paper_ok = bool(result.paper and result.paper.valid)
     if not paper_ok:
@@ -100,13 +112,21 @@ async def run_one(request_path: Path, result_path: Path) -> int:
         write_json_atomic(result_path, result.to_dict())
         return 2
 
-    # Retain existing profile selection, but downloads must never open a window.
-    is_trusted_profile = getattr(adapter, "key", "") in {"CNKI", "IEEE"}
+    # Downloads run with a visible Edge window unless the publisher is listed in
+    # PAPER_TOOL_HEADLESS_PUBLISHERS: Cloudflare managed challenges (ACS/RSC/
+    # Taylor), IEEE's Error 418, and CNKI's slider CAPTCHA all block headless
+    # sessions. Challenge-heavy publishers (CNKI slider, IEEE 418, IOP's
+    # hCaptcha, Optica's text captcha) keep a persistent profile so one manual
+    # solve carries over to the rest of the batch; each publisher gets its own
+    # directory so concurrent workers never fight over one --user-data-dir.
+    challenge_publishers = {"CNKI", "IEEE", "IOP", "OPTICA"}
+    is_trusted_profile = getattr(adapter, "key", "") in challenge_publishers
     worker = BrowserWorker(
         1,
         settings,
         persistent_profile=is_trusted_profile,
-        headless=True,
+        headless=adapter.key in settings.headless_publishers,
+        profile_key=getattr(adapter, "key", None),
     )
     try:
         event("browser_start", "Starting isolated Edge process", publisher=adapter.key)
@@ -124,7 +144,21 @@ async def run_one(request_path: Path, result_path: Path) -> int:
             title_query=hint.get("title_query"),
             article_url_hint=hint.get("article_url"),
         )
-        result = await adapter.run(ctx)
+        # Bound the whole adapter run below the parent's hard kill so a wedged
+        # publisher session fails with diagnostics instead of being killed.
+        soft_budget = worker_budget_seconds(settings, doi)
+        try:
+            result = await asyncio.wait_for(adapter.run(ctx), timeout=soft_budget)
+        except TimeoutError:
+            result = ArticleResult(
+                doi=doi,
+                status=ItemStatus.FAILED,
+                message=(
+                    f"Download exceeded the {soft_budget}s worker budget; the "
+                    "publisher session was closed."
+                ),
+                diagnostics={'failure_stage': 'worker_budget'},
+            )
         result.diagnostics = {
             **ctx.navigation_diagnostics,
             **(result.diagnostics or {}),
@@ -135,6 +169,13 @@ async def run_one(request_path: Path, result_path: Path) -> int:
                 result.message = access_issue
                 result.diagnostics["access_issue"] = "publisher_challenge"
         result.status = finalize_status(result)
+        # Publisher had no entitled PDF? Try an open repository copy (green OA)
+        # before giving up — paywalled articles often have one. The worker's
+        # browser is still alive here, which clears Cloudflare-gated hosts.
+        if not (result.paper and result.paper.valid):
+            from .oa_fallback import try_green_oa
+            await try_green_oa(result, settings, worker=worker)
+            result.status = finalize_status(result)
         result.started_at = start_iso
         result.finished_at = now_iso()
         result.elapsed_seconds = round(time.monotonic() - started, 3)

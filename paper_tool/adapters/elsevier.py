@@ -9,6 +9,7 @@ import httpx
 
 from .base import AdapterContext, PublisherAdapter
 from ..download import DownloadArtifact
+from ..netutil import env_proxy_usable
 from ..models import ArticleResult
 from ..resources import (
     infer_extension,
@@ -508,7 +509,9 @@ class ElsevierAdapter(PublisherAdapter):
             write=30,
             pool=20,
         )
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout, follow_redirects=False, trust_env=env_proxy_usable()
+        ) as client:
             article_payload, article_meta_status = await self._api_json(
                 client, ctx, article_api_url
             )

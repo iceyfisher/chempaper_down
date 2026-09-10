@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from pydoll.exceptions import BrowserException, ConnectionException
+from pydoll.protocol.page.events import PageEvent
 
 from ..browser import BrowserWorker
 from ..config import Settings
@@ -62,94 +63,210 @@ class PublisherAdapter(ABC):
     async def navigate(self, ctx: AdapterContext, *, cloudflare: bool = False) -> str:
         """Navigate with short soft limits; the parent subprocess timeout is hard.
 
-        The Pydoll Cloudflare helper is intentionally opt-in. In real ACS runs an
-        iframe resolution failure could leave a Runtime.evaluate command blocked
-        inside Pydoll. Normal DOI navigation is attempted first and publisher DOM
-        markers decide whether the page is usable.
+        The Pydoll Cloudflare helper is opt-in per adapter. When enabled it is
+        armed *before* navigation, exactly like Pydoll's public
+        ``expect_and_bypass_cloudflare_captcha`` context manager: the handler runs
+        on the challenge page's load event and clicks the Turnstile widget while
+        Cloudflare is still rendering it. That context manager itself is not used
+        because its Page.disable cleanup has blocked for 60s on affected RSC
+        pages after Edge was already gone; the callback is removed here under a
+        watchdog instead.
         """
 
         url = f"https://doi.org/{ctx.doi}"
         tab = ctx.tab
-
-        try:
-            await asyncio.wait_for(
-                tab.go_to(url), timeout=ctx.settings.navigation_timeout_seconds
-            )
-        except Exception as exc:
-            if self.is_browser_disconnect(exc):
-                raise
-
-        await asyncio.sleep(ctx.settings.settle_seconds)
-
+        helper = None
         if cloudflare:
             ctx.navigation_diagnostics["cloudflare_wait_seconds"] = (
                 ctx.settings.cloudflare_timeout_seconds
             )
-            ctx.navigation_diagnostics["pydoll_cloudflare_helper"] = (
-                "pending"
-                if ctx.settings.enable_pydoll_cloudflare_helper
-                else "disabled"
-            )
-
-        if cloudflare and ctx.settings.enable_pydoll_cloudflare_helper:
-            # Give a JavaScript interstitial a short opportunity to resolve by
-            # itself before asking Pydoll to inspect/click a Turnstile widget.
-            article_ready = await self.wait_for_article_dom(
-                tab,
-                timeout=min(3.0, ctx.settings.cloudflare_timeout_seconds),
-            )
-            ctx.navigation_diagnostics["article_dom_before_cloudflare_helper"] = (
-                article_ready
-            )
-            if not article_ready:
+            if ctx.settings.enable_pydoll_cloudflare_helper:
+                helper = await self.arm_cloudflare_helper(ctx)
                 ctx.navigation_diagnostics["pydoll_cloudflare_helper"] = (
-                    "attempted_bounded_direct"
-                )
-                try:
-                    await asyncio.wait_for(
-                        tab.refresh(),
-                        timeout=ctx.settings.navigation_timeout_seconds,
-                    )
-                    bypass = getattr(tab, "_bypass_cloudflare", None)
-                    if bypass is None:
-                        raise RuntimeError("Pydoll Cloudflare handler is unavailable")
-                    # The public context manager's Page.disable cleanup has blocked
-                    # for 60s on affected RSC pages after Edge was already gone.
-                    # Invoke the same Pydoll handler on the loaded page without that
-                    # event-subscription lifecycle, under an explicit watchdog.
-                    await asyncio.wait_for(
-                        bypass(
-                            {},
-                            time_to_wait_captcha=(
-                                ctx.settings.cloudflare_timeout_seconds
-                            ),
-                        ),
-                        timeout=ctx.settings.cloudflare_timeout_seconds + 1,
-                    )
-                except Exception as exc:
-                    if self.is_browser_disconnect(exc):
-                        raise
-                    ctx.navigation_diagnostics["pydoll_cloudflare_error"] = repr(exc)
-
-                # Pydoll returns after the challenge interaction, while
-                # Cloudflare may still be redirecting and building the article
-                # DOM. Do not classify that intermediate page as a hard failure.
-                article_ready = await self.wait_for_article_dom(
-                    tab,
-                    timeout=ctx.settings.cloudflare_timeout_seconds,
+                    "armed" if helper else "unavailable"
                 )
             else:
-                ctx.navigation_diagnostics["pydoll_cloudflare_helper"] = "not_needed"
-            ctx.navigation_diagnostics["article_dom_after_cloudflare_helper"] = (
-                article_ready
-            )
+                ctx.navigation_diagnostics["pydoll_cloudflare_helper"] = "disabled"
 
         try:
-            return await asyncio.wait_for(tab.current_url, timeout=3)
+            try:
+                await asyncio.wait_for(
+                    tab.go_to(url), timeout=ctx.settings.navigation_timeout_seconds
+                )
+            except Exception as exc:
+                if self.is_browser_disconnect(exc):
+                    raise
+
+            await asyncio.sleep(ctx.settings.settle_seconds)
+
+            if helper is not None:
+                await self.run_cloudflare_helper(ctx, helper)
+
+            try:
+                return await asyncio.wait_for(tab.current_url, timeout=3)
+            except Exception as exc:
+                if self.is_browser_disconnect(exc):
+                    raise
+                return url
+        finally:
+            if helper is not None:
+                await self.disarm_cloudflare_helper(tab, helper)
+
+    async def arm_cloudflare_helper(
+        self,
+        ctx: AdapterContext,
+        *,
+        tab=None,
+        diagnostics: dict | None = None,
+    ) -> dict | None:
+        """Subscribe Pydoll's Turnstile handler to the next page load event.
+
+        The handler has to be registered before navigation: Cloudflare injects
+        the widget after the load event and re-renders it during the proof of
+        work, so a handler invoked only after the page settled (or after a
+        refresh) can miss the challenge window entirely. Secondary tabs may pass
+        their own *tab* and *diagnostics* so they do not overwrite the article
+        page's navigation record.
+        """
+
+        tab = ctx.tab if tab is None else tab
+        diag = ctx.navigation_diagnostics if diagnostics is None else diagnostics
+        bypass = getattr(tab, "_bypass_cloudflare", None)
+        if bypass is None:
+            diag["pydoll_cloudflare_error"] = (
+                "Pydoll Cloudflare handler is unavailable"
+            )
+            return None
+
+        done = asyncio.Event()
+
+        async def handler(event):
+            try:
+                await bypass(
+                    event,
+                    time_to_wait_captcha=ctx.settings.cloudflare_timeout_seconds,
+                )
+            finally:
+                done.set()
+
+        try:
+            if not tab.page_events_enabled:
+                await asyncio.wait_for(tab.enable_page_events(), timeout=5)
+            callback_id = await asyncio.wait_for(
+                tab.on(PageEvent.LOAD_EVENT_FIRED, handler), timeout=5
+            )
         except Exception as exc:
             if self.is_browser_disconnect(exc):
                 raise
-            return url
+            diag["pydoll_cloudflare_error"] = repr(exc)
+            return None
+        return {"callback_id": callback_id, "done": done}
+
+    async def run_cloudflare_helper(
+        self,
+        ctx: AdapterContext,
+        helper: dict,
+        *,
+        tab=None,
+        diagnostics: dict | None = None,
+    ) -> None:
+        tab = ctx.tab if tab is None else tab
+        diag = ctx.navigation_diagnostics if diagnostics is None else diagnostics
+        article_ready = await self.wait_for_article_dom(
+            tab,
+            timeout=min(3.0, ctx.settings.cloudflare_timeout_seconds),
+        )
+        diag["article_dom_before_cloudflare_helper"] = article_ready
+        if article_ready:
+            diag["pydoll_cloudflare_helper"] = "not_needed"
+        else:
+            try:
+                await asyncio.wait_for(
+                    helper["done"].wait(),
+                    timeout=ctx.settings.cloudflare_timeout_seconds + 1,
+                )
+            except Exception as exc:
+                if self.is_browser_disconnect(exc):
+                    raise
+                diag["pydoll_cloudflare_error"] = repr(exc)
+            # Pydoll returns after the challenge interaction, while Cloudflare may
+            # still be redirecting and building the article DOM. Do not classify
+            # that intermediate page as a hard failure.
+            article_ready = await self.wait_for_article_dom(
+                tab,
+                timeout=ctx.settings.cloudflare_timeout_seconds,
+            )
+        diag["article_dom_after_cloudflare_helper"] = article_ready
+
+    @staticmethod
+    async def disarm_cloudflare_helper(tab, helper: dict) -> None:
+        try:
+            await asyncio.wait_for(
+                tab.remove_callback(helper["callback_id"]), timeout=3
+            )
+        except Exception:
+            pass
+
+    MANUAL_CHALLENGE_MARKERS = (
+        "captcha",
+        "just a moment",
+        "checking your browser",
+        "bot manager",
+        "attention required",
+        "security verification",
+        "请稍候",
+        "正在验证",
+        "验证您是真人",
+    )
+
+    async def page_challenge_state(self, tab) -> str | None:
+        """Return the visible challenge marker on the page, if any."""
+
+        try:
+            title = (await asyncio.wait_for(tab.title, timeout=3) or "").lower()
+        except Exception as exc:
+            if self.is_browser_disconnect(exc):
+                raise
+            return "unknown"
+        for marker in self.MANUAL_CHALLENGE_MARKERS:
+            if marker in title:
+                return marker
+        return None
+
+    async def wait_for_manual_challenge(
+        self, ctx: AdapterContext, *, tab=None, timeout: float | None = None
+    ) -> bool:
+        """Wait for the operator to clear a challenge we cannot auto-solve.
+
+        Some publishers gate content behind hCaptcha or custom text captchas
+        (IOP's Radware Bot Manager, Optica). The download browser is visible,
+        so a human can solve the challenge once; the persistent profile keeps
+        that clearance for the rest of the batch. In a headless session there
+        is nobody to solve it, so give up immediately.
+        """
+
+        tab = ctx.tab if tab is None else tab
+        wait = ctx.settings.manual_captcha_wait_seconds if timeout is None else timeout
+        if getattr(ctx.worker, "headless", True) or wait <= 0:
+            return False
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait
+        ctx.navigation_diagnostics.setdefault("manual_challenge_waits", []).append(
+            {"wait_seconds": wait}
+        )
+        while True:
+            marker = await self.page_challenge_state(tab)
+            if marker is None:
+                cleared = await self.wait_for_article_dom(
+                    tab, timeout=ctx.settings.cloudflare_timeout_seconds
+                )
+                if cleared:
+                    ctx.navigation_diagnostics["manual_challenge_cleared"] = True
+                    return True
+            if loop.time() >= deadline:
+                ctx.navigation_diagnostics["manual_challenge_cleared"] = False
+                return False
+            await asyncio.sleep(2.0)
 
     async def wait_for_article_dom(self, tab, *, timeout: float) -> bool:
         loop = asyncio.get_running_loop()
@@ -285,6 +402,8 @@ class PublisherAdapter(ABC):
             "verify you are human",
             "attention required",
             "security verification",
+            "bot manager",
+            "captcha",
             "请稍候",
             "正在验证",
             "验证您是真人",
