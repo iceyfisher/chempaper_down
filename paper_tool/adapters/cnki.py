@@ -99,8 +99,9 @@ class CnkiAdapter(PublisherAdapter):
 
     CNKI papers have no Supporting Information in this pipeline: the adapter
     only retrieves the main article PDF plus the DOI / Chinese title metadata.
-    It also acts as the last-resort adapter for DOIs no other publisher claims:
-    the DOI is searched on CNKI and the matched article is downloaded.
+    It claims only explicit ``cnki:`` keys submitted from the CNKI search UI;
+    any other unmatched DOI prefix fails fast as unsupported instead of
+    burning a browser session on a CNKI search that will not match anyway.
     """
 
     key = "CNKI"
@@ -108,8 +109,8 @@ class CnkiAdapter(PublisherAdapter):
 
     @classmethod
     def matches_doi(cls, doi: str) -> bool:
-        # Explicit cnki: keys and any DOI no other adapter claimed.
-        return True
+        # Explicit cnki: keys only. Never a generic fallback.
+        return doi.strip().lower().startswith("cnki:")
 
     async def run(self, ctx: AdapterContext) -> ArticleResult:
         tab = ctx.tab

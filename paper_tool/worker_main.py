@@ -101,15 +101,22 @@ async def run_one(request_path: Path, result_path: Path) -> int:
 
     adapter = get_adapter(doi)
     if adapter is None:
+        # No adapter claims this prefix: fail immediately, before any browser
+        # starts. A wrong-publisher search would only burn the DOI's budget.
+        prefix = doi.split("/", 1)[0]
         result = ArticleResult(
             doi=doi,
             status=ItemStatus.FAILED,
-            message="Unsupported DOI/publisher. Add a PublisherAdapter.",
+            message=(
+                f"Unsupported DOI/publisher: no adapter claims the '{prefix}' "
+                "prefix, so no download was attempted."
+            ),
             started_at=start_iso,
             finished_at=now_iso(),
             elapsed_seconds=round(time.monotonic() - started, 3),
         )
         write_json_atomic(result_path, result.to_dict())
+        event("unsupported", result.message)
         return 2
 
     # Downloads run with a visible Edge window unless the publisher is listed in

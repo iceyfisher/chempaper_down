@@ -33,6 +33,9 @@ ALL_ADAPTERS = [
     IopAdapter,
     ApsAdapter,
     OpticaAdapter,
+    # CNKI only claims explicit cnki: keys from the CNKI search UI. DOIs no
+    # other adapter claims fail fast as unsupported instead of being pushed
+    # into a pointless CNKI search.
     CnkiAdapter,
 ]
 
