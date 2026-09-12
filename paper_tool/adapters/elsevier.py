@@ -8,7 +8,9 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from .base import AdapterContext, PublisherAdapter
-from ..download import DownloadArtifact
+from ..download import (
+    DownloadArtifact, blob_download, native_navigation_download,
+)
 from ..netutil import env_proxy_usable
 from ..models import ArticleResult
 from ..resources import (
@@ -16,7 +18,9 @@ from ..resources import (
     obvious_error_payload,
     resolve_download_extension,
 )
-from ..storage import doi_to_filename, validate_file
+from ..storage import (
+    doi_to_filename, looks_like_truncated_paper, pdf_page_count, validate_file,
+)
 
 
 ELSEVIER_API_BASE = "https://api.elsevier.com/content"
@@ -138,7 +142,18 @@ def parse_article_metadata(payload: dict | None) -> dict[str, str]:
         "year": date_match.group(0) if date_match else "",
         "pii": pii,
         "article_url": article_url,
+        "page_range": _record_value(core, "prism:pageRange", "pageRange"),
     }
+
+
+def page_span_from_range(page_range: str | None) -> int | None:
+    """Expected page count from a prism:pageRange value like '317-324'."""
+
+    numbers = re.findall(r"\d+", page_range or "")
+    if len(numbers) < 2:
+        return None
+    span = int(numbers[-1]) - int(numbers[0]) + 1
+    return span if span >= 2 else None
 
 
 def _allowed_elsevier_url(url: str) -> bool:
@@ -379,6 +394,188 @@ class ElsevierAdapter(PublisherAdapter):
                 return None, f"request_error:{type(exc).__name__}"
         return None, "too_many_redirects"
 
+    async def _browser_pdf_download(
+        self,
+        ctx: AdapterContext,
+        pii: str | None,
+        target: Path,
+        *,
+        already_navigated: bool,
+    ) -> tuple[DownloadArtifact | None, str]:
+        """Fetch the main PDF through a ScienceDirect browser session.
+
+        The campus IP often carries an entitlement the API key does not, so when
+        the Article Retrieval API is denied or returns a first-page preview, the
+        article page's own PDF link is downloaded with the session's cookies.
+        """
+
+        tab = ctx.tab
+        try:
+            article_url = (
+                f"https://www.sciencedirect.com/science/article/pii/{pii}"
+                if pii
+                else f"https://doi.org/{ctx.doi}"
+            )
+            # Land on the article page and poll for the PDF link. ScienceDirect's
+            # Cloudflare interstitial does not clear by itself in a visible
+            # browser; an armed-helper reload after ~35s has been verified to
+            # clear it, so use that pattern here.
+            try:
+                await asyncio.wait_for(
+                    tab.go_to(article_url),
+                    timeout=ctx.settings.navigation_timeout_seconds,
+                )
+            except Exception as exc:
+                if self.is_browser_disconnect(exc):
+                    raise
+            pdf_href = None
+            not_entitled = False
+            purchase_strikes = 0
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 90
+            reloaded = False
+            while loop.time() < deadline:
+                await asyncio.sleep(3)
+                try:
+                    title = await asyncio.wait_for(tab.title, timeout=4)
+                except Exception as exc:
+                    if self.is_browser_disconnect(exc):
+                        raise
+                    title = ""
+                if "请稍候" in (title or "") or "moment" in (title or "").lower():
+                    if not reloaded and loop.time() > deadline - 55:
+                        reloaded = True
+                        try:
+                            bypass = getattr(tab, "_bypass_cloudflare", None)
+                            reload_task = asyncio.create_task(
+                                asyncio.wait_for(tab.refresh(), timeout=20)
+                            )
+                            if bypass is not None:
+                                await asyncio.wait_for(
+                                    bypass({}, time_to_wait_captcha=30), timeout=35
+                                )
+                            await reload_task
+                        except Exception as exc:
+                            if self.is_browser_disconnect(exc):
+                                raise
+                    continue
+                for selector in (
+                    'a[href*="/pdfft"]',
+                    'a[aria-label*="Download PDF"]',
+                    'a[data-track-action="Download PDF"]',
+                ):
+                    try:
+                        link = await asyncio.wait_for(
+                            tab.query(selector, timeout=4, raise_exc=False),
+                            timeout=6,
+                        )
+                    except Exception as exc:
+                        if self.is_browser_disconnect(exc):
+                            raise
+                        link = None
+                    if link:
+                        href = link.get_attribute("href") or ""
+                        if href:
+                            pdf_href = href
+                            break
+                if pdf_href:
+                    break
+                # The SPA renders the access bar before the download button; a
+                # single "Purchase PDF" sighting is not conclusive. Require two
+                # consecutive rounds before declaring the network unentitled.
+                try:
+                    purchase = await asyncio.wait_for(
+                        tab.query('a[href*="/getaccess/pii/"][href*="purchase"]',
+                                  timeout=3, raise_exc=False),
+                        timeout=5,
+                    )
+                except Exception:
+                    purchase = None
+                if purchase is not None:
+                    purchase_strikes += 1
+                    if purchase_strikes >= 2:
+                        # The page rendered with a "Purchase PDF" option instead
+                        # of a download: this network is not entitled to the article.
+                        not_entitled = True
+                        break
+                    await asyncio.sleep(5)
+                else:
+                    purchase_strikes = 0
+            if pdf_href is None:
+                # A cold profile faces ScienceDirect's unsolvable non-interactive
+                # challenge; with the persistent (warm) profile it usually clears
+                # after the armed reload. If it still has not, the visible window
+                # lets the operator clear it by hand once — the cookie sticks.
+                try:
+                    title = await asyncio.wait_for(tab.title, timeout=4)
+                except Exception:
+                    title = ""
+                if ("请稍候" in (title or "") or "moment" in (title or "").lower()):
+                    if await self.wait_for_manual_challenge(ctx):
+                        for _ in range(10):
+                            await asyncio.sleep(3)
+                            try:
+                                title = await asyncio.wait_for(tab.title, timeout=4)
+                            except Exception:
+                                title = ""
+                            if "请稍候" not in (title or "") and "moment" not in (title or "").lower():
+                                break
+                        for selector in (
+                            'a[href*="/pdfft"]',
+                            'a[aria-label*="Download PDF"]',
+                            'a[data-track-action="Download PDF"]',
+                        ):
+                            try:
+                                link = await asyncio.wait_for(
+                                    tab.query(selector, timeout=4, raise_exc=False),
+                                    timeout=6,
+                                )
+                            except Exception:
+                                link = None
+                            if link:
+                                href = link.get_attribute("href") or ""
+                                if href:
+                                    pdf_href = href
+                                    break
+                if pdf_href is None:
+                    return None, (
+                        "browser_sciencedirect_not_entitled"
+                        if not_entitled
+                        else "browser_sciencedirect_challenge_blocked"
+                    )
+            try:
+                base = await asyncio.wait_for(tab.current_url, timeout=3)
+            except Exception:
+                base = article_url
+            pdf_href = urljoin(base, pdf_href)
+            artifact = await blob_download(
+                tab,
+                ctx.worker.staging_dir,
+                pdf_href,
+                target,
+                ctx.settings.blob_download_timeout_seconds,
+                link_text="PDF",
+            )
+            if artifact is not None:
+                return artifact, "browser_sciencedirect"
+            path = await native_navigation_download(
+                ctx.worker,
+                pdf_href,
+                target,
+                timeout=min(ctx.settings.native_download_timeout_seconds, 60),
+            )
+            if path is not None:
+                valid, _ = validate_file(path, ".pdf")
+                if valid:
+                    return DownloadArtifact(path=path, extension=".pdf"), (
+                        "browser_sciencedirect_native"
+                    )
+            return None, "browser_sciencedirect_failed"
+        except Exception as exc:
+            if self.is_browser_disconnect(exc):
+                raise
+            return None, f"browser_error:{type(exc).__name__}"
+
     async def _pii_from_tab(self, tab) -> str | None:
         for selector in (
             'meta[name="citation_pii"]',
@@ -584,17 +781,21 @@ class ElsevierAdapter(PublisherAdapter):
                     "elsevier_article_metadata_api": article_meta_status,
                     "elsevier_article_metadata_xml_api": metadata_xml_status,
                     "elsevier_article_metadata_search_api": metadata_search_status,
-                    "elsevier_main_pdf_strategy": "article_retrieval_api_only",
+                    "elsevier_main_pdf_strategy": "article_retrieval_api_then_browser",
                     "elsevier_si_strategy": "public_cdn_pii_mmc_probe_only",
-                    "elsevier_browser_used_for_metadata_only": browser_navigated,
+                    "elsevier_browser_used": browser_navigated,
                     "elsevier_pii": pii,
                     "elsevier_pii_source": pii_source,
                 }
             )
 
             paper_target = paper_dir / f"{doi_to_filename(ctx.doi)}.pdf"
+            expected_pages = page_span_from_range(metadata.get("page_range"))
+            if expected_pages:
+                result.diagnostics["expected_page_span"] = expected_pages
             result.paper = self.existing_paper_result(ctx)
             if result.paper is None:
+                paper_artifact = None
                 if key:
                     paper_api_url = build_article_pdf_url(ctx.doi)
                     paper_artifact, paper_status = await self._download_binary(
@@ -606,14 +807,62 @@ class ElsevierAdapter(PublisherAdapter):
                         expected_extension=".pdf",
                     )
                 else:
-                    paper_artifact, paper_status = None, "api_key_missing"
+                    paper_api_url = build_article_pdf_url(ctx.doi)
+                    paper_status = "api_key_missing"
                 result.diagnostics["elsevier_article_pdf_api"] = paper_status
+                if paper_artifact is not None:
+                    # Without entitlement the Article Retrieval API still answers
+                    # 200 with a first-page-only preview PDF. Reject it against
+                    # the prism:pageRange; article-number journals expose no page
+                    # range at all, and a single page from this API view is a
+                    # preview there too (real one-page items are covered by the
+                    # browser fallback below).
+                    truncated = looks_like_truncated_paper(
+                        paper_artifact.path, expected_pages
+                    )
+                    if truncated is None and expected_pages is None:
+                        pages = pdf_page_count(paper_artifact.path)
+                        if pages is not None and pages <= 1:
+                            truncated = (
+                                "single-page PDF from the unentitled API view; "
+                                "treated as a first-page preview"
+                            )
+                    if truncated:
+                        result.diagnostics["elsevier_page_check"] = truncated
+                        try:
+                            paper_artifact.path.unlink()
+                        except OSError:
+                            pass
+                        paper_artifact = None
+                        paper_status = "api_returned_first_page_preview"
+                        result.diagnostics["elsevier_article_pdf_api"] = paper_status
+                if paper_artifact is None:
+                    browser_artifact, browser_status = await self._browser_pdf_download(
+                        ctx, pii, paper_target, already_navigated=browser_navigated
+                    )
+                    result.diagnostics["elsevier_browser_pdf_fallback"] = browser_status
+                    if browser_artifact is not None:
+                        truncated = looks_like_truncated_paper(
+                            browser_artifact.path, expected_pages
+                        )
+                        if truncated:
+                            result.diagnostics["elsevier_browser_page_check"] = truncated
+                            try:
+                                browser_artifact.path.unlink()
+                            except OSError:
+                                pass
+                        else:
+                            paper_artifact = browser_artifact
+                            paper_status = browser_status
+                            browser_navigated = True
                 if paper_artifact:
                     result.paper = self.file_result(
                         "paper",
                         paper_artifact,
                         paper_api_url,
-                        "elsevier_article_retrieval_api",
+                        "elsevier_article_retrieval_api"
+                        if paper_status != "browser_sciencedirect"
+                        else "browser_sciencedirect",
                         extension=".pdf",
                     )
             else:
@@ -671,7 +920,18 @@ class ElsevierAdapter(PublisherAdapter):
 
             if result.paper is None:
                 paper_status = result.diagnostics.get("elsevier_article_pdf_api")
-                if str(paper_status).startswith(("http_401", "http_403")):
+                browser_status = result.diagnostics.get("elsevier_browser_pdf_fallback")
+                if str(paper_status) == "api_returned_first_page_preview":
+                    result.message = (
+                        "Elsevier API only returned a first-page preview (no "
+                        "entitlement); the preview was rejected. "
+                        + (
+                            "ScienceDirect also shows no entitled download for this network."
+                            if browser_status == "browser_sciencedirect_not_entitled"
+                            else f"Browser fallback: {browser_status}."
+                        )
+                    )
+                elif str(paper_status).startswith(("http_401", "http_403")):
                     result.message = (
                         "Elsevier Article Retrieval API denied the main PDF for this "
                         "key/network entitlement; SI discovery was still attempted."

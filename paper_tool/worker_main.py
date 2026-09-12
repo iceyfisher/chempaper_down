@@ -126,7 +126,7 @@ async def run_one(request_path: Path, result_path: Path) -> int:
     # hCaptcha, Optica's text captcha) keep a persistent profile so one manual
     # solve carries over to the rest of the batch; each publisher gets its own
     # directory so concurrent workers never fight over one --user-data-dir.
-    challenge_publishers = {"CNKI", "IEEE", "IOP", "OPTICA"}
+    challenge_publishers = {"CNKI", "IEEE", "IOP", "OPTICA", "ELSEVIER"}
     is_trusted_profile = getattr(adapter, "key", "") in challenge_publishers
     worker = BrowserWorker(
         1,

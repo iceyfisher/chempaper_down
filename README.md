@@ -21,7 +21,7 @@
 | Taylor & Francis | ✅ | ✅（如有） | `10.1080/*`；Supplemental / 关联 Figshare |
 | Wiley（含 IET `10.1049`） | ✅ | ✅ | 自动使用 600 秒整篇预算 |
 | Springer Nature / Nature（`10.1038`） | ✅ | ✅ | 无权限时自动尝试绿色 OA 仓库副本 |
-| Elsevier / ScienceDirect | ✅ 官方 API | ✅ 公开 CDN | 需要配置 `ELSEVIER_API_KEY` |
+| Elsevier / ScienceDirect | ✅ 官方 API + 浏览器兜底 | ✅ 公开 CDN | 需要配置 `ELSEVIER_API_KEY`；无权限时 API 只回"首页预览"会被自动拒收，改走 ScienceDirect 页内下载；仍无权限则明确报错（不再产出单页 PDF），并自动尝试绿色 OA 仓库副本 |
 | **IEEE Xplore**（含 `10.23919`） | ✅ | ✅（如有） | stamp 页 iframe（ielx/getPDF.jsp）→ 直接下载 |
 | MDPI（`10.3390`） | ✅ | ✅（如有） | 开放获取，`/article/<doi>/s<n>` SI |
 | IOP（`10.1088`、`10.7567`） | ✅ | ✅（如有） | Radware/hCaptcha 可能需要人工在有头窗口过一次 |
