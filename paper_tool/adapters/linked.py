@@ -14,7 +14,10 @@ from ..download import (
 )
 from ..models import ArticleResult
 from ..resources import infer_extension, resolve_download_extension
-from ..storage import doi_to_filename, validate_file
+from ..storage import (
+    doi_to_filename, looks_like_truncated_paper, page_span_from_metas,
+    validate_file,
+)
 
 
 SNAPSHOT = """return {
@@ -296,6 +299,9 @@ class LinkedPublisherAdapter(PublisherAdapter):
             result.diagnostics.update(diagnostics)
             result.diagnostics['si_candidates'] = len(links)
             if result.paper is None:
+                expected_pages = page_span_from_metas(snapshot.get('metas'))
+                if expected_pages:
+                    result.diagnostics['expected_page_span'] = expected_pages
                 for candidate in pdfs:
                     artifact, method = await download_validated(
                         ctx, candidate['url'], paper_dir / f'{doi_to_filename(ctx.doi)}.pdf', 'PDF', paper=True,
@@ -305,6 +311,18 @@ class LinkedPublisherAdapter(PublisherAdapter):
                     if result.paper.extension != '.pdf':
                         result.paper.valid = False
                         result.paper.error = 'expected_article_pdf'
+                    if result.paper.valid and artifact is not None:
+                        # A structurally valid PDF can still be a publisher's
+                        # first-page preview (Wiley-style) or a truncated file;
+                        # cross-check the page count against the citation span.
+                        truncated = looks_like_truncated_paper(
+                            artifact.path, expected_pages,
+                        )
+                        if truncated:
+                            result.paper.valid = False
+                            result.paper.error = 'preview_or_truncated_pdf'
+                            result.paper.method = method
+                            result.diagnostics['paper_page_check'] = truncated
                     if result.paper.valid:
                         break
             if not result.paper or not result.paper.valid:

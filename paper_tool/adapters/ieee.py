@@ -7,7 +7,7 @@ from .base import AdapterContext, PublisherAdapter
 from ..download import blob_download, native_navigation_download
 from ..models import ArticleResult
 from ..resources import infer_extension
-from ..storage import doi_to_filename
+from ..storage import doi_to_filename, looks_like_truncated_paper
 
 
 DOCUMENT_URL_RE = re.compile(r"/document/(\d+)")
@@ -24,7 +24,9 @@ METADATA_WAIT_JS = """
     doi: g ? g.doi : null,
     title: g ? g.title : null,
     journal: g ? g.publicationTitle : null,
-    year: g ? String(g.publicationYear || g.publicationDate || '') : null
+    year: g ? String(g.publicationYear || g.publicationDate || '') : null,
+    startPage: g ? String(g.startPage || '') : '',
+    endPage: g ? String(g.endPage || '') : ''
   };
 })()
 """
@@ -217,6 +219,17 @@ class IeeeAdapter(PublisherAdapter):
             result.paper = self.file_result(
                 "paper", path, stamp_url, method, extension=".pdf"
             )
+            # Old scanned articles are sometimes served as a one-page preview.
+            first = re.search(r"\d+", str(meta.get("startPage") or ""))
+            last = re.search(r"\d+", str(meta.get("endPage") or ""))
+            if first and last:
+                span = int(last.group(0)) - int(first.group(0)) + 1
+                result.diagnostics["expected_page_span"] = span
+                truncated = looks_like_truncated_paper(path, span)
+                if truncated:
+                    result.paper.valid = False
+                    result.paper.error = "preview_or_truncated_pdf"
+                    result.diagnostics["paper_page_check"] = truncated
 
         # history.back() above restored the article page; fetch any
         # supplementary files found there through the session that holds the

@@ -303,7 +303,10 @@ let pollTimer=null,currentJob=null;
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function toast(t,err){const el=document.createElement('div');el.className='toast-item'+(err?' err':'');el.textContent=t;
   $('#toast').appendChild(el);setTimeout(()=>el.remove(),err?5200:3200)}
-async function jsonFetch(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}
+async function jsonFetch(url,opts){
+  // 每个请求都带超时：后端偶尔被磁盘扫描/子进程清理拖住时，前端不至于永远挂着。
+  const merged={...opts,signal:AbortSignal.timeout(opts&&opts.timeoutMs||9000)};
+  const r=await fetch(url,merged);let d={};try{d=await r.json()}catch{}
   if(!r.ok)throw new Error(d.detail||r.statusText);return d}
 function setLoading(btn,on){if(!btn)return;btn.classList.toggle('loading',on);btn.disabled=on||btn.dataset.lock==='1'}
 async function copyText(t,btn){
@@ -485,16 +488,20 @@ async function doCnkiSearch(btn){
   finally{setLoading(btn,false)}}
 
 /* ---------- job polling ---------- */
+let refreshBusy=false,pollErrors=0;
 function beginPolling(id){currentJob=id;$('#sJob').textContent=id;$('#cancelJob').disabled=false;
   switchTab('tab-jobs');toast('任务已启动 · '+id);
-  if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,2500)}
-async function refresh(){if(!currentJob)return;
-  try{const j=await jsonFetch('/api/jobs/'+currentJob);
+  if(pollTimer)clearInterval(pollTimer);refresh();pollTimer=setInterval(refresh,4000)}
+async function refresh(){if(!currentJob||refreshBusy)return;
+  refreshBusy=true;
+  try{const j=await jsonFetch('/api/jobs/'+currentJob);pollErrors=0;
     $('#sTotal').textContent=j.total;$('#sDone').textContent=j.completed;$('#sRunning').textContent=j.running;
     render(j.results||[]);
     if(['completed','failed','cancelled'].includes(j.status)){
       clearInterval(pollTimer);pollTimer=null;$('#cancelJob').disabled=true;toast('Job 结束：'+j.status)}}
-  catch(e){toast('读取状态失败：'+e.message,true)}}
+  catch(e){ // 轮询失败不打断循环；连续失败才提示一次
+    pollErrors++;if(pollErrors===3)toast('状态读取失败，将继续重试：'+e.message,true)}
+  finally{refreshBusy=false}}
 function render(items){$('#results').innerHTML=items.map(x=>{
   const pdf=x.paper?.valid?'✓':(x.paper?'✗':'—'),si=`${x.si_successful??0}/${x.si_detected??0}`;
   return `<tr><td><code>${esc(x.doi)}</code></td><td class="status ${esc(x.status)}">${esc(x.status)}</td>

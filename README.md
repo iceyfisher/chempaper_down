@@ -339,15 +339,17 @@ http://127.0.0.1:8765/mcp
 
 ## 八、归档目录规则
 
-每篇文章一个独立目录，目录名 = `DOI_年份_期刊`，内含 `pdf/` 与 `si/` 两个子文件夹：
+按**期刊 → 文章**两级组织，每篇文章目录内含 `pdf/` 与 `si/` 两个子文件夹：
 
 ```text
 downloads/
-├─ 10.1021_acs.catal.6c02592_2026_ACS Catalysis/
-│  ├─ pdf/                                    # 正文：<doi>.pdf
-│  └─ si/                                     # SI：<doi>_si_<url哈希>.<扩展名>
-├─ 10.19799_j.cnki.2095-4239.2023.0001_2023_储能科学与技术/
-│  └─ pdf/                                    # 知网文章只有正文
+├─ ACS Catalysis/
+│  └─ 10.1021_acs.catal.6c02592_2026/
+│     ├─ pdf/                                # 正文：<doi>.pdf
+│     └─ si/                                 # SI：<doi>_si_<url哈希>.<扩展名>
+├─ 储能科学与技术/
+│  └─ 10.19799_j.cnki.2095-4239.2023.0001_2023/
+│     └─ pdf/                                # 知网文章只有正文
 ├─ _jobs/          # 任务状态 JSON（重启后仍可查看）
 ├─ _logs/          # 每个子进程的完整日志
 ├─ _manifests/     # 每篇论文的最终结果清单（排查用）
@@ -355,9 +357,10 @@ downloads/
 └─ _worker_runs/   # 子进程工作目录（request/result）
 ```
 
-- 年份取自出版社页面 citation 元数据（`citation_publication_date` 等）或 Elsevier `coverDate`；取不到时为 `unknown`。
-- **旧版目录完全兼容**：旧结构 `<出版社 - 期刊>/paper/` 中的已下载文件仍会被重复检查识别，不会重复下载。
+- 年份取自出版社页面 citation 元数据（`citation_publication_date` 等）或 Elsevier `coverDate`；取不到时为 `unknown`。期刊取不到时归入 `Unknown Journal/`。
+- **旧版平铺目录自动迁移**：服务启动时会把 `downloads/<doi>_<年份>_<期刊>/` 旧结构搬进 `downloads/<期刊>/<doi>_<年份>/`，并同步修正 `_manifests` 中的文件路径；更早的 `<出版社 - 期刊>/paper/` 布局仍会被重复检查识别，不会重复下载。
 - 重复提交规则：正文 + SI 全部校验通过 → `skipped_duplicate` 直接跳过；只缺 SI → 保留正文，仅补 SI。
+- **预览页检测**：正文下载后会用 PDF 实际页数对照 `citation_firstpage/lastpage` 页码范围；无权限时出版社返回的"仅首页预览"文件会被判为 `preview_or_truncated_pdf` 无效，不再混入归档。
 
 ## 九、配置参考
 

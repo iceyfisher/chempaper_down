@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -14,7 +15,7 @@ from ..download import (
 )
 from ..models import ArticleResult
 from ..resources import infer_extension
-from ..storage import doi_to_filename
+from ..storage import doi_to_filename, looks_like_truncated_paper
 
 
 WILEY_FALLBACK = {
@@ -204,6 +205,40 @@ class WileyAdapter(PublisherAdapter):
         if not marker:
             raise RuntimeError("Wiley article page could not be restored for SI")
 
+    async def _citation_page_span(self, tab) -> int | None:
+        """Read citation_firstpage/citation_lastpage metas off the article page."""
+
+        try:
+            raw = await asyncio.wait_for(
+                tab.execute_script(
+                    "(() => {"
+                    " const get = n => (document.querySelector(`meta[name=\"${n}\"]`) || {}).content || '';"
+                    " return {first: get('citation_firstpage'), last: get('citation_lastpage')};"
+                    "})()",
+                    return_by_value=True,
+                ),
+                timeout=5,
+            )
+        except Exception:
+            return None
+        data = _unwrap(raw) or {}
+        match_first = re.search(r"\d+", str(data.get("first") or ""))
+        match_last = re.search(r"\d+", str(data.get("last") or ""))
+        if not match_first or not match_last:
+            return None
+        span = int(match_last.group(0)) - int(match_first.group(0)) + 1
+        return span if span >= 1 else None
+
+    @staticmethod
+    def _flag_preview_paper(result: ArticleResult, expected_pages: int | None) -> None:
+        if not expected_pages or not (result.paper and result.paper.valid and result.paper.path):
+            return
+        truncated = looks_like_truncated_paper(Path(result.paper.path), expected_pages)
+        if truncated:
+            result.paper.valid = False
+            result.paper.error = "preview_or_truncated_pdf"
+            result.diagnostics["paper_page_check"] = truncated
+
     async def run(self, ctx: AdapterContext) -> ArticleResult:
         article_url = await self.navigate(ctx, cloudflare=True)
         tab = ctx.tab
@@ -297,6 +332,14 @@ class WileyAdapter(PublisherAdapter):
         # restore the original article before discovering/downloading SI.
         await self._restore_article(ctx, article_url)
 
+        # Wiley answers unentitled PDF requests with a valid one-page "preview"
+        # file, so validate the page count against the citation page range.
+        expected_pages = await self._citation_page_span(tab)
+        if expected_pages:
+            result.diagnostics["expected_page_span"] = expected_pages
+        if result.paper is not None and result.paper.valid:
+            self._flag_preview_paper(result, expected_pages)
+
         if result.paper is None or not result.paper.valid:
             direct_pdf_url = wiley_direct_pdf_url(
                 article_url,
@@ -321,6 +364,7 @@ class WileyAdapter(PublisherAdapter):
                 method,
                 extension=".pdf",
             )
+            self._flag_preview_paper(result, expected_pages)
 
         if ctx.want_si:
             await tab.query(

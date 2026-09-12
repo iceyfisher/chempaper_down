@@ -14,7 +14,6 @@ import psutil
 
 from .config import Settings
 from .models import ArticleResult, FileResult, ItemStatus
-from .registry import get_adapter
 from .storage import (
     doi_to_filename,
     find_existing_paper,
@@ -30,6 +29,15 @@ ProgressCallback = Callable[[ArticleResult], Awaitable[None] | None]
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _duplicate_scan(download_root, doi: str):
+    """Disk-bound duplicate pre-scan, safe to run in a worker thread."""
+
+    return (
+        find_existing_paper(download_root, doi),
+        load_article_manifest(download_root, doi),
+    )
 
 
 def _read_worker_result(result_path: Path) -> tuple[ArticleResult | None, str | None]:
@@ -156,7 +164,6 @@ class DownloadService:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir = self.settings.download_root / "_logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self._publisher_locks: dict[str, asyncio.Lock] = {}
 
     def _persist_result(self, result: ArticleResult) -> None:
         safe = doi_to_filename(result.doi)
@@ -440,9 +447,12 @@ class DownloadService:
         pending: list[str] = []
 
         # HARD GLOBAL DUPLICATE CHECK BEFORE ANY CHILD/EDGE PROCESS STARTS.
+        # Each scan is disk-bound; run it in a worker thread so a large
+        # archive cannot block the API event loop and freeze the web UI.
         for doi in ordered:
-            existing = find_existing_paper(self.settings.download_root, doi)
-            manifest = load_article_manifest(self.settings.download_root, doi)
+            existing, manifest = await asyncio.to_thread(
+                _duplicate_scan, self.settings.download_root, doi
+            )
             if existing and manifest_has_complete_si(manifest):
                 item = _duplicate_result(doi, existing, manifest)
                 result_by_doi[doi] = item
@@ -459,17 +469,14 @@ class DownloadService:
 
         async def execute(doi: str) -> None:
             nonlocal slot_counter
-            adapter = get_adapter(doi)
-            publisher_key = adapter.key if adapter else doi.split("/", 1)[0]
-            publisher_lock = self._publisher_locks.setdefault(
-                publisher_key,
-                asyncio.Lock(),
-            )
-            async with publisher_lock, semaphore:
+            async with semaphore:
                 # Re-check immediately before subprocess creation in case another job
                 # finished the same DOI while this task was waiting for a slot.
-                existing = find_existing_paper(self.settings.download_root, doi)
-                manifest = load_article_manifest(self.settings.download_root, doi)
+                # The archive scan is disk-bound; keep it off the event loop so a
+                # large archive cannot stall the API's request handling.
+                existing, manifest = await asyncio.to_thread(
+                    _duplicate_scan, self.settings.download_root, doi
+                )
                 if existing and manifest_has_complete_si(manifest):
                     item = _duplicate_result(doi, existing, manifest)
                     result_by_doi[doi] = item

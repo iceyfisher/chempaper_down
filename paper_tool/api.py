@@ -19,6 +19,7 @@ from .doi import extract_dois, load_dois_from_file
 from .jobs import JobManager
 from .registry import supported_publishers
 from .search import resolve_titles, search_openalex
+from .storage import migrate_legacy_article_dirs
 
 
 BASE_SETTINGS = Settings.from_env()
@@ -39,6 +40,17 @@ except ImportError:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # One-time reorganization of the legacy flat archive into the
+    # journal/<article> layout; disk-bound, so keep it off the event loop
+    # while the server starts serving.
+    try:
+        migrated = await asyncio.to_thread(
+            migrate_legacy_article_dirs, BASE_SETTINGS.download_root
+        )
+        if migrated:
+            print(f"Migrated {migrated} legacy article dir(s) to journal layout", flush=True)
+    except Exception as exc:  # never block startup on a layout migration hiccup
+        print(f"Archive migration skipped: {exc!r}", flush=True)
     if _MCP_AVAILABLE:
         # Starlette does not run mounted sub-app lifespans: manage the MCP
         # session manager explicitly for the lifetime of the server.
