@@ -64,9 +64,20 @@ class JobManager:
         self.tasks: dict[str, asyncio.Task] = {}
         self.state_dir = self.base_settings.download_root / "_jobs"
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self._save_locks: dict[str, asyncio.Lock] = {}
 
     def _save(self, job: JobState):
         write_json_atomic(self.state_dir / f"{job.id}.json", job.to_dict())
+
+    async def _save_async(self, job: JobState):
+        # The full job (all result diagnostics) is serialized per progress
+        # event; keep that disk/CPU work off the API event loop. The lock is
+        # essential: concurrent heartbeat saves racing on one file raise
+        # PermissionError on Windows, which used to abort the whole job and
+        # leave in-flight DOIs stuck in "running" forever.
+        lock = self._save_locks.setdefault(job.id, asyncio.Lock())
+        async with lock:
+            await asyncio.to_thread(self._save, job)
 
     def get(self, job_id: str) -> JobState | None:
         job = self.jobs.get(job_id)
@@ -142,7 +153,7 @@ class JobManager:
     ):
         job.status = "running"
         job.started_at = now_iso()
-        self._save(job)
+        await self._save_async(job)
 
         async def progress(item: ArticleResult):
             data = item.to_dict()
@@ -151,7 +162,7 @@ class JobManager:
                 1 for x in job.results.values() if x.get("status") in TERMINAL_ITEM_STATUSES
             )
             job.running = sum(1 for x in job.results.values() if x.get("status") == "running")
-            self._save(job)
+            await self._save_async(job)
 
         try:
             service = DownloadService(settings)
@@ -169,6 +180,14 @@ class JobManager:
             job.status = "failed"
             job.error = repr(exc)
         finally:
+            # A job-level crash must not leave in-flight DOIs as eternal
+            # "running" zombies in the UI; sweep them to a terminal state.
+            for data in job.results.values():
+                if data.get("status") == "running":
+                    data["status"] = "failed"
+                    data["message"] = (
+                        data.get("message") or ""
+                    ) + " Job aborted before this DOI finished."
             job.finished_at = now_iso()
             job.running = 0
             self._save(job)

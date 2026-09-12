@@ -349,9 +349,14 @@ class DownloadService:
                 await heartbeat_task
             except asyncio.CancelledError:
                 pass
-            try:
-                await asyncio.wait_for(reader_task, timeout=3)
-            except Exception:
+            # Give the log reader a short grace period, but NEVER await its
+            # cancellation: a readline blocked on a stdout pipe that orphaned
+            # Edge children still hold open is uncancellable on the Windows
+            # Proactor, and awaiting it hangs this coroutine forever — which
+            # leaks the concurrency slot (browser windows decay 4→3→2→1) and
+            # stalls the job. asyncio.wait() does not cancel on timeout.
+            done, _ = await asyncio.wait({reader_task}, timeout=3)
+            if reader_task not in done:
                 reader_task.cancel()
 
         elapsed = round(time.monotonic() - start, 3)
@@ -487,13 +492,32 @@ class DownloadService:
                     slot_counter += 1
                     slot = ((slot_counter - 1) % self.settings.max_concurrency) + 1
 
-                item = await self._run_subprocess(
-                    doi,
-                    slot,
-                    callback,
-                    download_si=download_si,
-                    hint=(article_hints or {}).get(doi),
+                # Belt-and-braces: nothing inside _run_subprocess may hold a
+                # slot forever. The budget plus teardown margin bounds even an
+                # unexpected hang; on breach a timeout result is synthesized so
+                # the slot is released and the job keeps moving.
+                hard_cap = self.settings.timeout_for_doi(doi) + max(
+                    30, self.settings.subprocess_kill_grace_seconds * 4
                 )
+                try:
+                    async with asyncio.timeout(hard_cap):
+                        item = await self._run_subprocess(
+                            doi,
+                            slot,
+                            callback,
+                            download_si=download_si,
+                            hint=(article_hints or {}).get(doi),
+                        )
+                except TimeoutError:
+                    item = ArticleResult(
+                        doi=doi,
+                        status=ItemStatus.TIMEOUT,
+                        message=(
+                            f"DOI worker did not return within the {hard_cap}s "
+                            "hard slot guard; the slot was reclaimed."
+                        ),
+                        diagnostics={"failure_stage": "slot_guard"},
+                    )
                 result_by_doi[doi] = item
                 await _emit(callback, item)
 
